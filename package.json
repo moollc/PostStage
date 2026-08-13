@@ -21,6 +21,7 @@
     "test:browser-media-session": "node tests/browser-media-session.mjs",
     "test:browser-platform": "node tests/browser-platform-paste.mjs",
     "test:browser-board": "node tests/browser-board-copied.mjs",
+    "test:browser-noted": "node tests/browser-board-noted.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
   },
   "dependencies": {},

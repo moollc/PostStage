@@ -142,28 +142,6 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
   border: 0; background: transparent; padding: 0.28rem 0.45rem;
   max-width: 9.5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.board-pick.has-last-paste,
-.board-pick[data-last-paste] {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.28rem;
-  min-width: 0;
-  max-width: 11rem;
-  overflow: hidden;
-}
-.board-pick.has-last-paste::after,
-.board-pick[data-last-paste]::after {
-  content: "copied";
-  flex: none;
-  font-size: 0.58rem;
-  line-height: 1.2;
-  letter-spacing: 0.03em;
-  color: var(--muted);
-  padding: 0.06rem 0.28rem;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: #12151b;
-}
 .board-status { font-size: 0.68rem; padding: 0.18rem 0.4rem; }
 .board-status.published { border-color: var(--ok); color: var(--ok); }
 .board-src,
@@ -173,16 +151,25 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
   color: var(--amber); flex: none;
 }
 .board-src { padding: 0 0.2rem 0 0; }
-.board-copied {
+.board-copied,
+.board-noted {
   font-size: 0.58rem;
+  line-height: 1.2;
   letter-spacing: 0.03em;
   color: var(--muted);
-  padding: 0 0.28rem 0 0;
+  padding: 0.06rem 0.28rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #12151b;
   flex: none;
-  max-width: 4.2rem;
+  max-width: 4.5rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.board-noted {
+  border-color: #2a3d34;
+  color: #9aa5a0;
 }
 .card.idea .idea-part-hint { text-transform: lowercase; opacity: 0.92; }
 .card.idea.needs-part:not(.empty) { box-shadow: 0 0 0 1px #e8a54b33; }
