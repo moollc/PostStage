@@ -18,12 +18,12 @@ const INTERACTIONS = {
     expect: [
       'a copy-link share into a group chat — priced far above a like',
       'replies and quote-posts, the conversation signals',
-      'likes, which cost the reader least and are worth least'
+      'likes, which cost the reader least and are worth least of the actions a reader chooses to take'
     ],
     practices: [
       'Write a line worth pasting into a DM, not just tapping',
       'Ask one specific question a reply can actually answer',
-      'Reply to the first ten as if they are guests',
+      'Treat repliers as guests. People who follow each other are the conversation — manners, not a For You weight',
       'A clip under ten seconds falls below the video-duration floor'
     ]
   },
