@@ -1,5 +1,5 @@
 import { execSync, spawnSync, exec, spawn } from 'child_process';
-import { existsSync, readFileSync, mkdirSync, createReadStream, statSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, statSync } from 'fs';
 import { createServer as createHttpsServer } from 'https';
 import { createServer as createHttpServer } from 'http';
 import { extname, resolve, dirname } from 'path';
@@ -11,6 +11,9 @@ const ROOT  = resolve(__dir, '../..');
 const WORKSPACE = resolve(ROOT, '..');
 const SHOTS_DIR = resolve(WORKSPACE, 'scaffold/shots');
 const SHOT_SCRIPT = resolve(__dir, 'capture-shot.mjs');
+const INBOX_DIR = resolve(WORKSPACE, 'scaffold/inbox');
+const INBOX_FILE = resolve(INBOX_DIR, 'posts.json');
+const INBOX_SEED = resolve(INBOX_DIR, 'seed-banter.json');
 const CERTS = resolve(ROOT, 'build/certs');
 const CERT  = resolve(CERTS, 'localhost.pem');
 const KEY   = resolve(CERTS, 'localhost-key.pem');
@@ -192,6 +195,40 @@ function normalizeAgents(parsed) {
   })).filter((a) => a.pane_id);
 }
 
+function inboxId() {
+  return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function readInboxPosts() {
+  mkdirSync(INBOX_DIR, { recursive: true });
+  let posts = [];
+  if (existsSync(INBOX_FILE)) {
+    try {
+      const data = JSON.parse(readFileSync(INBOX_FILE, 'utf8'));
+      if (Array.isArray(data.posts)) posts = data.posts;
+    } catch {
+      posts = [];
+    }
+  }
+  if (!posts.length && existsSync(INBOX_SEED)) {
+    try {
+      const seed = JSON.parse(readFileSync(INBOX_SEED, 'utf8'));
+      if (Array.isArray(seed.posts) && seed.posts.length) {
+        posts = seed.posts;
+        writeFileSync(INBOX_FILE, JSON.stringify({ posts }, null, 2));
+      }
+    } catch {
+      /* empty inbox */
+    }
+  }
+  return posts;
+}
+
+function writeInboxPosts(posts) {
+  mkdirSync(INBOX_DIR, { recursive: true });
+  writeFileSync(INBOX_FILE, JSON.stringify({ posts }, null, 2));
+}
+
 const portArgIdx = args.indexOf('--port');
 const port = portArgIdx !== -1 ? parseInt(args[portArgIdx + 1]) : await findFreePort(7744);
 const swVersion = Date.now();
@@ -203,6 +240,34 @@ async function handleRequest(req, res) {
 
   if (url.pathname === '/api/health' && req.method === 'GET') {
     return json(res, 200, { ok: true, herdr: herdrAvailable(), rust: Boolean(scoreBin()) });
+  }
+
+  if (url.pathname === '/api/inbox' && req.method === 'GET') {
+    return json(res, 200, { posts: readInboxPosts() });
+  }
+
+  if (url.pathname === '/api/inbox' && req.method === 'POST') {
+    let payload;
+    try { payload = JSON.parse(await readBody(req)); } catch {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    if (!payload || typeof payload !== 'object') {
+      return json(res, 400, { error: 'invalid_body' });
+    }
+    const posts = readInboxPosts();
+    const entry = {
+      id: String(payload.id || '').trim() || inboxId(),
+      title: String(payload.title || ''),
+      hook: String(payload.hook || ''),
+      body: String(payload.body || ''),
+      cta: String(payload.cta || ''),
+      platform: String(payload.platform || 'x'),
+      audience: String(payload.audience || ''),
+      source: String(payload.source || 'banter')
+    };
+    posts.push(entry);
+    writeInboxPosts(posts);
+    return json(res, 200, { ok: true, post: entry, posts });
   }
 
   if (url.pathname === '/api/score' && req.method === 'POST') {

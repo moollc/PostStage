@@ -194,5 +194,155 @@ t('the compatibility views are not serialized', () => {
   eq(Object.keys(raw).sort(), ['activeId', 'posts'], 'only board keys stored');
 });
 
+// --- source ---------------------------------------------------------------
+
+t('every post defaults to source studio', () => {
+  const s = loadState();
+  eq(getActive(s).source, 'studio', 'blank default');
+  eq(addPost(s).source, 'studio', 'addPost default');
+});
+
+t('addPost accepts a known source', () => {
+  const s = loadState();
+  eq(addPost(s, { source: 'banter' }).source, 'banter', 'banter');
+  eq(addPost(s, { source: 'marketing' }).source, 'marketing', 'marketing');
+});
+
+t('an unknown or malformed source falls back to studio', () => {
+  const s = loadState();
+  eq(addPost(s, { source: 'tiktok-brain' }).source, 'studio', 'unknown string');
+  eq(addPost(s, { source: null }).source, 'studio', 'null');
+  eq(addPost(s, { source: 7 }).source, 'studio', 'number');
+});
+
+t('source survives a save/load round trip', () => {
+  const s = loadState();
+  const id = addPost(s, { source: 'banter' }).id;
+  saveState(s);
+  const back = loadState();
+  eq(back.posts.find((p) => p.id === id).source, 'banter', 'persisted');
+});
+
+t('a stored post with a bad source is repaired on read', () => {
+  mem.set(KEY, JSON.stringify({ activeId: 'p1', posts: [{ id: 'p1', source: 'nonsense' }] }));
+  eq(getActive(loadState()).source, 'studio', 'coerced');
+});
+
+t('setSource changes it, and rejects unknown values', () => {
+  const s = loadState();
+  const id = s.activeId;
+  eq(store.setSource(s, id, 'marketing').source, 'marketing', 'set');
+  eq(store.setSource(s, id, 'bogus').source, 'studio', 'unknown coerced');
+  eq(store.setSource(s, 'nope', 'banter'), null, 'unknown id');
+});
+
+// --- outcome --------------------------------------------------------------
+
+t('every post defaults to a null outcome', () => {
+  const s = loadState();
+  eq(getActive(s).outcome, null, 'blank default');
+  eq(addPost(s).outcome, null, 'addPost default');
+});
+
+t('setOutcome records a note and stamps recordedAt', () => {
+  const s = loadState();
+  const p = store.setOutcome(s, s.activeId, 'flopped, 3 likes');
+  eq(p.outcome.note, 'flopped, 3 likes', 'note');
+  ok(p.outcome.recordedAt, 'recordedAt stamped');
+  ok(!Number.isNaN(Date.parse(p.outcome.recordedAt)), 'recordedAt is a real date');
+});
+
+t('setOutcome trims and keeps the first stamp on rewrite', () => {
+  const s = loadState();
+  const id = s.activeId;
+  const first = store.setOutcome(s, id, '  spaced note  ').outcome;
+  eq(first.note, 'spaced note', 'trimmed');
+  const second = store.setOutcome(s, id, 'a better note').outcome;
+  eq(second.note, 'a better note', 'note replaced');
+  ok(second.recordedAt, 'still stamped');
+});
+
+t('an empty note clears the outcome', () => {
+  const s = loadState();
+  const id = s.activeId;
+  store.setOutcome(s, id, 'something');
+  eq(store.setOutcome(s, id, '   ').outcome, null, 'whitespace clears');
+  store.setOutcome(s, id, 'again');
+  eq(store.setOutcome(s, id, null).outcome, null, 'null clears');
+});
+
+t('setOutcome returns null for an unknown id', () => {
+  eq(store.setOutcome(loadState(), 'nope', 'note'), null, 'null');
+});
+
+t('outcome survives a save/load round trip', () => {
+  const s = loadState();
+  const id = s.activeId;
+  store.setOutcome(s, id, 'saved 40, no clicks');
+  const stamp = getActive(s).outcome.recordedAt;
+  saveState(s);
+  const back = loadState();
+  eq(getActive(back).outcome.note, 'saved 40, no clicks', 'note persisted');
+  eq(getActive(back).outcome.recordedAt, stamp, 'stamp persisted unchanged');
+});
+
+t('a malformed stored outcome is repaired on read', () => {
+  mem.set(KEY, JSON.stringify({
+    activeId: 'p1',
+    posts: [
+      { id: 'p1', outcome: 'a bare string' },
+      { id: 'p2', outcome: { note: '   ' } },
+      { id: 'p3', outcome: { note: 'kept', recordedAt: 42 } },
+      { id: 'p4', outcome: 12345 }
+    ]
+  }));
+  const s = loadState();
+  const by = (id) => s.posts.find((p) => p.id === id);
+  eq(by('p1').outcome, { note: 'a bare string', recordedAt: null }, 'bare string wrapped');
+  eq(by('p2').outcome, null, 'blank note cleared');
+  eq(by('p3').outcome, { note: 'kept', recordedAt: null }, 'bad recordedAt dropped');
+  eq(by('p4').outcome, null, 'nonsense cleared');
+});
+
+// --- migration and views --------------------------------------------------
+
+t('a migrated v1 post gets studio source and null outcome', () => {
+  mem.set(LEGACY_KEY, JSON.stringify(V1));
+  const p = getActive(loadState());
+  eq(p.source, 'studio', 'source');
+  eq(p.outcome, null, 'outcome');
+  eq(p.hook, 'Old hook', 'v1 fields still survive');
+});
+
+t('a v2 board saved before these fields existed gains them', () => {
+  mem.set(KEY, JSON.stringify({
+    activeId: 'old1',
+    posts: [{ id: 'old1', title: 'Pre-banter', hook: 'h', status: 'published', publishedAt: '2026-01-01T00:00:00.000Z' }]
+  }));
+  const p = getActive(loadState());
+  eq(p.source, 'studio', 'source backfilled');
+  eq(p.outcome, null, 'outcome backfilled');
+  eq(p.status, 'published', 'existing fields untouched');
+  eq(p.publishedAt, '2026-01-01T00:00:00.000Z', 'stamp untouched');
+});
+
+t('getActive views still work with the new fields', () => {
+  const s = loadState();
+  eq(s.post.source, 'studio', 'source readable through the view');
+  eq(s.post.outcome, null, 'outcome readable through the view');
+  store.setOutcome(s, s.activeId, 'via helper');
+  eq(s.post.outcome.note, 'via helper', 'view sees the helper write');
+  const b = addPost(s, { source: 'banter' });
+  eq(s.post.source, 'banter', 'view follows to the new active post');
+  eq(s.post.id, b.id, 'sanity');
+});
+
+t('outcome and source are not confused with the heuristic score', () => {
+  const s = loadState();
+  store.setOutcome(s, s.activeId, 'went viral');
+  ok(!('score' in getActive(s)), 'no score field written onto the post');
+  ok(!('band' in getActive(s)), 'no band field written onto the post');
+});
+
 console.log(failed ? `\n${failed} FAILED` : '\nall store tests pass');
 process.exit(failed ? 1 : 0);

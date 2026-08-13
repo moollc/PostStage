@@ -1,5 +1,5 @@
 import { loadPlatforms, getPlatforms, getPlatform } from '/source/shared/platforms.js';
-import { loadState, saveState, uid, getActive, setActive, addPost, setPublished } from '/source/shared/store.js';
+import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome } from '/source/shared/store.js';
 import { scorePostMaybeWasm } from '/source/shared/score.js';
 import { structureFor, interactionsFor, monetizeFor, effectsFor, PARTS } from '/source/shared/playbook.js';
 import { listAgents, sendAgent, shortCwd } from '/source/shared/agent-bridge.js';
@@ -357,6 +357,20 @@ function stageCard() {
   status.className = 'board-status stage-status';
   bindStatusToggle(status, post);
   el.appendChild(status);
+
+  if (post.status === 'published') {
+    const how = document.createElement('input');
+    how.type = 'text';
+    how.className = 'outcome';
+    how.placeholder = 'How it did';
+    how.setAttribute('aria-label', 'How it did');
+    how.value = (post.outcome && post.outcome.note) || '';
+    how.addEventListener('change', () => {
+      setOutcome(state, post.id, how.value);
+      persist();
+    });
+    el.appendChild(how);
+  }
 
   const prev = document.createElement('div');
   prev.className = 'preview platform-' + platform.id + ' ' + platform.shape;
@@ -745,11 +759,19 @@ function paintBoard() {
       selectCard('stage');
       render();
     });
+    row.appendChild(pick);
+    if (post.source === 'banter') {
+      const mark = document.createElement('span');
+      mark.className = 'board-src';
+      mark.textContent = 'shop';
+      mark.title = 'From the shop inbox';
+      row.appendChild(mark);
+    }
     const st = document.createElement('button');
     st.type = 'button';
     st.className = 'board-status';
     bindStatusToggle(st, post);
-    row.append(pick, st);
+    row.appendChild(st);
     list.appendChild(row);
   }
   board.appendChild(list);
@@ -813,6 +835,44 @@ copyBtn.addEventListener('click', async () => {
 await loadPlatforms();
 applyView();
 render();
+pullInbox();
+setInterval(pullInbox, 10000);
+
+async function pullInbox() {
+  try {
+    const res = await fetch('/api/inbox');
+    if (!res.ok) return;
+    const data = await res.json();
+    const incoming = Array.isArray(data.posts) ? data.posts : [];
+    const have = new Set(state.posts.map((p) => p.id));
+    let added = false;
+    const stay = state.activeId;
+    for (const item of incoming) {
+      const id = String(item.id || '').trim();
+      if (!id || have.has(id)) continue;
+      addPost(state, {
+        id,
+        title: item.title || 'Untitled post',
+        hook: item.hook || '',
+        body: item.body || '',
+        cta: item.cta || '',
+        platform: item.platform || 'x',
+        audience: item.audience || '',
+        audienceHow: item.audience ? 'stated' : 'unknown',
+        source: item.source || 'banter'
+      });
+      have.add(id);
+      added = true;
+    }
+    if (added) {
+      setActive(state, stay);
+      persist();
+      render();
+    }
+  } catch {
+    /* inbox is optional */
+  }
+}
 
 function setPanCursor() {
   wrap.classList.toggle('pan-ready', spaceDown && !pan);

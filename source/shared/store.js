@@ -3,7 +3,11 @@
  *
  * The board holds many posts, one active. Shape:
  *
- *   { activeId, posts: [{ id, status, publishedAt, ideas[], ...postFields }] }
+ *   { activeId, posts: [{ id, status, publishedAt, source, outcome, ideas[], ...postFields }] }
+ *
+ * `source` is 'studio' | 'banter' | 'marketing'. `outcome` is null or
+ * { note, recordedAt } — an operator's record of what actually happened, kept
+ * deliberately separate from the heuristic score.
  *
  * v1 stored a single `{ post, ideas }`. That is migrated on read, not dropped —
  * see `migrate()`. The v1 key is left in place so a downgrade does not lose work.
@@ -16,6 +20,10 @@
 
 const KEY = 'poststage.v2';
 const LEGACY_KEY = 'poststage.v1';
+
+/** Where a post came from. Anything else is coerced back to `'studio'`. */
+export const SOURCES = ['studio', 'banter', 'marketing'];
+const DEFAULT_SOURCE = 'studio';
 
 /** Fields every post carries, with the defaults the canvas expects. */
 function blankPost(overrides = {}) {
@@ -35,9 +43,34 @@ function blankPost(overrides = {}) {
     audienceHow: 'unknown',
     status: 'draft',
     publishedAt: null,
+    source: DEFAULT_SOURCE,
+    outcome: null,
     ideas: [],
     ...overrides
   };
+}
+
+/** A source is only valid if it is one of the three we know. */
+function normalizeSource(value) {
+  return SOURCES.includes(value) ? value : DEFAULT_SOURCE;
+}
+
+/**
+ * An outcome is `null` or `{ note, recordedAt }`. A bare string is accepted and
+ * wrapped, since that is the shape a caller is most likely to reach for. An
+ * empty or whitespace-only note clears the outcome back to `null`.
+ */
+function normalizeOutcome(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') {
+    const note = value.trim();
+    return note ? { note, recordedAt: null } : null;
+  }
+  if (typeof value !== 'object') return null;
+  const note = String(value.note ?? '').trim();
+  if (!note) return null;
+  const at = value.recordedAt;
+  return { note, recordedAt: typeof at === 'string' && at ? at : null };
 }
 
 function blank() {
@@ -67,7 +100,10 @@ function migrate(v1) {
     id: post.id || uid(),
     ideas: Array.isArray(ideas) ? ideas : [],
     status: 'draft',
-    publishedAt: null
+    publishedAt: null,
+    // v1 predates both fields; a migrated post is studio work with no outcome yet.
+    source: normalizeSource(post.source),
+    outcome: normalizeOutcome(post.outcome)
   });
   return { activeId: merged.id, posts: [merged] };
 }
@@ -94,7 +130,10 @@ function normalize(board) {
       id: p.id || uid(),
       ideas: Array.isArray(p.ideas) ? p.ideas : [],
       status: p.status === 'published' ? 'published' : 'draft',
-      publishedAt: p.status === 'published' ? (p.publishedAt || null) : null
+      publishedAt: p.status === 'published' ? (p.publishedAt || null) : null,
+      // Boards written before source/outcome existed pick up the defaults here.
+      source: normalizeSource(p.source),
+      outcome: normalizeOutcome(p.outcome)
     }));
   if (!posts.length) posts.push(blankPost());
   const activeId = posts.some((p) => p.id === board.activeId) ? board.activeId : posts[0].id;
@@ -162,9 +201,15 @@ export function setActive(state, id) {
   return getActive(state);
 }
 
-/** Append a fresh draft, make it active, and return it. */
+/**
+ * Append a fresh draft, make it active, and return it. `overrides.source` is
+ * validated, so `addPost(state, { source: 'banter' })` is the way a banter post
+ * enters the board; an unknown source falls back to `'studio'`.
+ */
 export function addPost(state, overrides = {}) {
   const post = blankPost(overrides);
+  post.source = normalizeSource(post.source);
+  post.outcome = normalizeOutcome(post.outcome);
   state.posts.push(post);
   state.activeId = post.id;
   return post;
@@ -188,8 +233,44 @@ export function setPublished(state, id, published) {
   return post;
 }
 
+/**
+ * Record what actually happened to a post — the observed result, in the
+ * operator's words. Stamps `recordedAt` when a note is first written.
+ *
+ * Passing an empty or whitespace-only note clears the outcome back to `null`,
+ * which is how you undo a mis-typed note. Returns the post, or `null` when the
+ * id is unknown.
+ *
+ * This is a record, not a score: nothing here feeds the heuristic.
+ */
+export function setOutcome(state, id, note) {
+  const post = state.posts.find((p) => p.id === id);
+  if (!post) return null;
+  const next = normalizeOutcome(note);
+  if (!next) {
+    post.outcome = null;
+    return post;
+  }
+  post.outcome = {
+    note: next.note,
+    recordedAt: next.recordedAt || new Date().toISOString()
+  };
+  return post;
+}
+
+/** Set where a post came from. Unknown values fall back to `'studio'`. */
+export function setSource(state, id, source) {
+  const post = state.posts.find((p) => p.id === id);
+  if (!post) return null;
+  post.source = normalizeSource(source);
+  return post;
+}
+
 export function uid() {
   return 'c' + Math.random().toString(36).slice(2, 9);
 }
 
-export const __testing = { blank, blankPost, migrate, normalize, withViews, isBoard, isLegacy, KEY, LEGACY_KEY };
+export const __testing = {
+  blank, blankPost, migrate, normalize, withViews, isBoard, isLegacy,
+  normalizeSource, normalizeOutcome, DEFAULT_SOURCE, KEY, LEGACY_KEY
+};
