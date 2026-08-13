@@ -158,5 +158,41 @@ t('seeding an href does not mark the post published or invent an outcome', () =>
   eq(p.lastPaste, null, 'no paste invented');
 });
 
+// --- this file stays a fixture check -------------------------------------
+
+t('this test file never expects a view field, only forbids one', () => {
+  // The seed is the one place a metric could enter the workspace looking
+  // official. This file is the guard on that — so it must not itself drift
+  // into asserting a count exists. Every count word here has to sit inside a
+  // negation (`!/.../` or a banned-key list), never a positive expectation.
+  const self = readFileSync(resolve(here, 'chair-sit.test.mjs'), 'utf8');
+  const lines = self.split('\n');
+
+  const COUNT_WORD = /\b(views?|likes?|favou?rites?|reposts?|retweets?|replies|quotes?|bookmarks?|impressions?|followers?|reach|engagement)\b/i;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!COUNT_WORD.test(line)) continue;
+    // Comments explain the rule; they are not assertions.
+    if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue;
+    // Test *names* describe what is forbidden; the assertion is the next lines.
+    if (/^\s*t\(/.test(line)) continue;
+    // The guard line itself, and the banned-key list it uses.
+    if (/COUNT_WORD|const banned =/.test(line)) continue;
+
+    const negated = /!\s*\//.test(line) || /banned\.test/.test(line) || /^\s*ok\(!/.test(line);
+    ok(negated, `line ${i + 1} mentions a count outside a negation: ${line.trim()}`);
+  }
+});
+
+t('no fixture built here carries a count field', () => {
+  // Guards the other direction: a future case must not seed `{ views: 26 }`
+  // to "test" that it survives. Nothing in this file should construct one.
+  const self = readFileSync(resolve(here, 'chair-sit.test.mjs'), 'utf8');
+  const body = self.replace(/^\s*(\/\/|\*|\/\*).*$/gm, '');
+  ok(!/\b(views?|likes?|reposts?|impressions?|followers?)\s*:/i.test(body),
+    'a count is being assigned as an object property somewhere in this file');
+});
+
 console.log(failed ? `\n${failed} FAILED` : '\nall chair sit tests pass');
 process.exit(failed ? 1 : 0);
