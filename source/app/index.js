@@ -5,6 +5,7 @@ import { structureFor, interactionsFor, monetizeFor, effectsFor, PARTS } from '/
 import { listAgents, sendAgent, readAgent, lastShopLine, shortCwd } from '/source/shared/agent-bridge.js';
 import { formatThread, isFinalThreadPart } from '/source/shared/export.js';
 import { formatStageBrief } from '/source/shared/brief.js';
+import { isSafeRelPath, mediaSrcForPath } from '/source/shared/media-link.js';
 
 const canvas = document.getElementById('canvas');
 const wrap = canvas.parentElement;
@@ -21,6 +22,8 @@ let drag = null;
 let pan = null;
 let spaceDown = false;
 const view = { x: 0, y: 0, scale: 1 };
+/** This-sitting blob URLs for clips that already have a persistable path/href. */
+const sessionClips = new Map();
 
 function persist() {
   saveState(state);
@@ -163,41 +166,82 @@ function isImageMedia(m) {
 }
 
 function isVideoMedia(m) {
-  if (!m || !m.url) return false;
+  if (!m) return false;
   if (m.type && m.type.startsWith('video/')) return true;
-  const url = String(m.url);
+  const url = String(m.url || '');
+  const path = String(m.path || '');
   if (url.startsWith('data:video/')) return true;
-  return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
+  return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url) || /\.(mp4|webm|mov|m4v)$/i.test(path);
 }
 
 function isUsableBlob(m) {
   return Boolean(m && m.session && /^blob:/i.test(String(m.url || '')));
 }
 
+const MEDIA_LINKED_CLIP = 'Linked clip';
+const MEDIA_SESSION_ONLY = 'Session only';
 const LEAVES_ON_REFRESH = 'This picture leaves when you refresh';
+const SESSION_ONLY_CLIP = 'Session-only clip';
+
+function mediaSessionOverlayText(m) {
+  if (isVideoMedia(m)) return SESSION_ONLY_CLIP;
+  return LEAVES_ON_REFRESH;
+}
 
 function mediaLeavesNote(m) {
   if (!m || !m.url || mediaPersists(m)) return '';
-  return `<span class="media-session media-leaves">${LEAVES_ON_REFRESH}</span>`;
+  return `<span class="media-session media-leaves">${escapeHtml(mediaSessionOverlayText(m))}</span>`;
 }
 
-function mediaSlotHtml(media) {
+function mediaLinkedNote(m) {
+  if (!m || !isVideoMedia(m) || !mediaPersists(m)) return '';
+  return `<span class="media-session media-linked">${MEDIA_LINKED_CLIP}</span>`;
+}
+
+function videoPreviewSrc(m) {
+  const post = getActive(state);
+  const live = post && sessionClips.get(post.id);
+  if (live) return live;
+  const path = m && m.path;
+  if (path && isSafeRelPath(path)) return mediaSrcForPath(path);
+  const href = String((m && m.href) || '');
+  if (/^\/image\?path=/i.test(href)) return href;
+  const url = String((m && m.url) || '');
+  if (/^\/image\?path=/i.test(url)) return url;
+  if (/^blob:/i.test(url) && isUsableBlob(m)) return url;
+  return '';
+}
+
+function emptyMediaPlaceholder() {
+  return `<span class="media-placeholder">Click or drop an image or video<span class="media-session">${MEDIA_SESSION_ONLY}</span></span>`;
+}
+
+/** Native <video> attrs for this preview. Do not invent a player chrome. */
+function videoPlaybackAttrs(platform) {
+  const id = platform && platform.id;
+  if (id === 'youtube') return 'controls playsinline preload="metadata"';
+  return 'muted autoplay loop playsinline preload="metadata"';
+}
+
+function mediaSlotHtml(media, platform) {
   const m = media && media[0];
-  if (!m || !m.url) {
-    return '<span class="media-placeholder">Click or drop an image<span class="media-session">Session only</span></span>';
-  }
+  if (!m) return emptyMediaPlaceholder();
+  const linkedSrc = isVideoMedia(m) ? videoPreviewSrc(m) : '';
+  if (!m.url && !linkedSrc) return emptyMediaPlaceholder();
   // Blob URLs die on reload. A stored blob must not render as a picture.
-  if (/^blob:/i.test(m.url) && !isUsableBlob(m)) {
-    return '<span class="media-placeholder">Click or drop an image<span class="media-session">Session only</span></span>';
+  if (/^blob:/i.test(String(m.url || '')) && !isUsableBlob(m) && !linkedSrc) {
+    return emptyMediaPlaceholder();
   }
   const leaves = mediaLeavesNote(m);
+  const linked = mediaLinkedNote(m);
   if (isImageMedia(m)) {
-    return `<img class="media-img" src="${m.url}" alt="${escapeHtml(m.name || 'media')}">${leaves}`;
+    return `<img class="media-img" src="${m.url}" alt="${escapeHtml(m.name || 'media')}">${linked}${leaves}`;
   }
   if (isVideoMedia(m)) {
-    return `<video class="media-vid" src="${m.url}" controls muted playsinline></video>${leaves}`;
+    if (!linkedSrc) return emptyMediaPlaceholder();
+    return `<video class="media-vid" src="${linkedSrc}" ${videoPlaybackAttrs(platform)}></video>${linked}${leaves}`;
   }
-  return `<span class="media-placeholder">Media attached</span>${leaves}`;
+  return `<span class="media-placeholder">Media attached</span>${linked}${leaves}`;
 }
 
 function platformName(platform) {
@@ -206,7 +250,7 @@ function platformName(platform) {
 
 function buildPreview(post, platform) {
   const text = previewText(post, platform);
-  const media = mediaSlotHtml(post.media);
+  const media = mediaSlotHtml(post.media, platform);
   const name = escapeHtml(platformName(platform));
   const handle = escapeHtml(platform.handle);
   const label = escapeHtml(platform.label);
@@ -651,6 +695,37 @@ function quotaError(err) {
   return Boolean(err && (err.name === 'QuotaExceededError' || err.code === 22));
 }
 
+function fileBasename(name) {
+  return String(name || '').replace(/\\/g, '/').split('/').pop();
+}
+
+async function linkLocalVideo(file) {
+  const name = fileBasename(file && file.name);
+  if (!name || /Users|GoogleDrive|(^|\/)home(\/|$)/i.test(name)) return null;
+  try {
+    const res = await fetch('/api/media/link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, size: file.size })
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const path = data && data.path;
+    if (!isSafeRelPath(path)) return null;
+    const url = mediaSrcForPath(path);
+    if (!url) return null;
+    return {
+      name,
+      type: file.type || 'video/webm',
+      path,
+      url,
+      session: false
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function attachLocalFile(file, imageOnly) {
   if (!file) return false;
   if (imageOnly && !file.type.startsWith('image/')) return false;
@@ -658,6 +733,43 @@ async function attachLocalFile(file, imageOnly) {
   const post = getActive(state);
   const prev = post.media && post.media[0];
   if (prev && prev.url && String(prev.url).startsWith('blob:')) URL.revokeObjectURL(prev.url);
+
+  if (file.type.startsWith('video/')) {
+    const name = fileBasename(file.name);
+    const linked = await linkLocalVideo(file);
+    const path = (linked && linked.path) || (isSafeRelPath(name) ? name : '');
+    if (!path) {
+      const prevLive = sessionClips.get(post.id);
+      if (prevLive) {
+        URL.revokeObjectURL(prevLive);
+        sessionClips.delete(post.id);
+      }
+      post.media = [{
+        name,
+        type: file.type,
+        url: URL.createObjectURL(file),
+        session: true
+      }];
+      persist();
+      render();
+      return true;
+    }
+    const prevLive = sessionClips.get(post.id);
+    if (prevLive) URL.revokeObjectURL(prevLive);
+    sessionClips.set(post.id, URL.createObjectURL(file));
+    const href = mediaSrcForPath(path);
+    post.media = [{
+      name,
+      type: file.type || 'video/webm',
+      path,
+      href,
+      url: href,
+      session: false
+    }];
+    persist();
+    render();
+    return true;
+  }
 
   const keep = { name: file.name, type: file.type, url: '', session: false };
   const smallImage = file.type.startsWith('image/') && file.size <= 900000;
@@ -688,6 +800,11 @@ async function attachLocalFile(file, imageOnly) {
 
 function clearLocalMedia() {
   const post = getActive(state);
+  const live = sessionClips.get(post.id);
+  if (live) {
+    URL.revokeObjectURL(live);
+    sessionClips.delete(post.id);
+  }
   const prev = post.media && post.media[0];
   if (prev && prev.url && String(prev.url).startsWith('blob:')) URL.revokeObjectURL(prev.url);
   post.media = [];
@@ -702,20 +819,35 @@ function bindStageMediaSlot(preview) {
   slot.setAttribute('role', 'button');
   slot.tabIndex = 0;
   const attached = getActive(state).media && getActive(state).media[0];
-  if (attached && attached.url && mediaPersists(attached)) {
-    slot.setAttribute('aria-label', 'Replace local image');
-    slot.title = 'Click or drop a local image';
-  } else if (attached && attached.url && !mediaPersists(attached)) {
-    slot.setAttribute('aria-label', LEAVES_ON_REFRESH);
-    slot.title = LEAVES_ON_REFRESH;
+  if (attached && mediaPersists(attached)) {
+    slot.setAttribute('aria-label', `${MEDIA_LINKED_CLIP} — replace image or video`);
+    slot.title = `${MEDIA_LINKED_CLIP} — click or drop an image or video`;
+  } else if (attached && !mediaPersists(attached)) {
+    const sess = mediaSessionOverlayText(attached);
+    slot.setAttribute('aria-label', sess);
+    slot.title = sess;
   } else {
-    slot.setAttribute('aria-label', 'Add a local image — this session only');
-    slot.title = 'Click or drop a local image (this session only)';
+    slot.setAttribute('aria-label', `Add image or video — ${MEDIA_SESSION_ONLY.toLowerCase()}`);
+    slot.title = `Click or drop an image or video (${MEDIA_SESSION_ONLY.toLowerCase()})`;
+  }
+
+  const ph = slot.querySelector('.media-placeholder');
+  if (ph) {
+    const sess = ph.querySelector('.media-session');
+    ph.replaceChildren();
+    ph.append('Click or drop an image or video');
+    if (sess) ph.append(sess);
+    else {
+      const s = document.createElement('span');
+      s.className = 'media-session';
+      s.textContent = MEDIA_SESSION_ONLY;
+      ph.append(s);
+    }
   }
 
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = 'image/*';
+  input.accept = 'image/*,video/*';
   input.hidden = true;
   slot.appendChild(input);
 
@@ -736,6 +868,8 @@ function bindStageMediaSlot(preview) {
   const pick = () => input.click();
   slot.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (e.target.closest('.media-remove')) return;
+    if (e.target.closest('video')) return;
     pick();
   });
   slot.addEventListener('keydown', (e) => {
@@ -745,7 +879,7 @@ function bindStageMediaSlot(preview) {
   });
   input.addEventListener('click', (e) => e.stopPropagation());
   input.addEventListener('change', () => {
-    attachLocalFile(input.files && input.files[0], true);
+    attachLocalFile(input.files && input.files[0], false);
   });
 
   for (const type of ['dragenter', 'dragover']) {
@@ -760,9 +894,27 @@ function bindStageMediaSlot(preview) {
     e.preventDefault();
     e.stopPropagation();
     slot.classList.remove('drag-over');
-    const file = [...(e.dataTransfer.files || [])].find((f) => f.type.startsWith('image/'));
-    attachLocalFile(file, true);
+    const file = [...(e.dataTransfer.files || [])].find(
+      (f) => f.type.startsWith('image/') || f.type.startsWith('video/')
+    );
+    attachLocalFile(file, false);
   });
+
+  primeVideoFrame(preview);
+}
+
+/** SloPo-style first frame so X's muted autoplay hole is not a dark box. */
+function primeVideoFrame(preview) {
+  const vid = preview.querySelector('video.media-vid');
+  if (!vid) return;
+  const seek = () => {
+    const dur = vid.duration;
+    if (!Number.isFinite(dur) || dur <= 0) return;
+    if (vid.currentTime >= 0.05) return;
+    vid.currentTime = Math.min(0.1, Math.max(0.01, dur * 0.1));
+  };
+  if (vid.readyState >= 1) seek();
+  else vid.addEventListener('loadedmetadata', seek, { once: true });
 }
 
 function bindDrag(el, obj) {
@@ -1235,22 +1387,30 @@ function bindLiveCopy(btn) {
       }, 2000);
     };
     try {
-      const platform = getPlatform(state.post.platform);
-      const text = formatLiveCopy(state.post, platform).trim();
+      const post = getActive(state);
+      const platform = getPlatform(post.platform);
+      const text = formatLiveCopy(post, platform).trim();
       if (!text || text === 'Untitled post') {
         flash('Nothing to copy');
         return;
       }
-      await navigator.clipboard.writeText(text);
-      const post = getActive(state);
-      const parts = liveThread(state.post, platform);
-      setLastPaste(state, post.id, {
+      const partIndex = threadCursor.index;
+      const parts = liveThread(post, platform);
+      const snap = {
         text,
         platformId: platform.id,
-        partIndex: threadCursor.index
-      });
+        partIndex,
+        stage: {
+          hook: String(post.hook || ''),
+          body: String(post.body || ''),
+          cta: String(post.cta || ''),
+          hashtags: Array.isArray(post.hashtags) ? post.hashtags.map(String) : []
+        }
+      };
+      await navigator.clipboard.writeText(text);
+      setLastPaste(state, post.id, snap);
       persist();
-      if (isFinalThreadPart(threadCursor.index, parts.length)) {
+      if (isFinalThreadPart(partIndex, parts.length)) {
         copiedIds.add(post.id);
       }
       paintOutcomePrompt();
@@ -1475,7 +1635,8 @@ function ensureBoard() {
   board.id = 'post-board';
   board.className = 'board';
   board.setAttribute('aria-label', 'Posts');
-  wrap.insertBefore(board, wrap.firstChild);
+  const lane = document.getElementById('idea-lane');
+  wrap.insertBefore(board, lane || canvas);
   board.addEventListener('wheel', (e) => e.stopPropagation());
   return board;
 }
@@ -1485,14 +1646,40 @@ function hasLastPaste(post) {
 }
 
 /** Synthetic download name from the snapshot only. No title, no home path. */
-function copyOutFilename(snap) {
+function copyOutFilename(snap, allParts) {
   const plat = String((snap && snap.platformId) || 'paste')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '')
     .slice(0, 24) || 'paste';
+  if (allParts) return plat + '-thread.txt';
   const raw = snap && snap.partIndex;
   const part = Number.isFinite(Number(raw)) ? Math.max(0, Math.floor(Number(raw))) : 0;
   return plat + '-part-' + part + '.txt';
+}
+
+/** Frozen formatThread parts when the live post is an X thread. Not a live rewrite. */
+function copyOutAllParts(post, snap) {
+  const livePlat = getPlatform(post.platform);
+  if (livePlat.id !== 'x') return false;
+  if (formatThread(post, livePlat).length < 2) return false;
+  const frozen = copyOutFrozenParts(snap);
+  return frozen.length > 1;
+}
+
+function copyOutFrozenParts(snap) {
+  const stage = snap && snap.stage;
+  if (!stage || snap.platformId !== 'x') return [];
+  return formatThread({
+    hook: String(stage.hook || ''),
+    body: String(stage.body || ''),
+    cta: String(stage.cta || ''),
+    hashtags: Array.isArray(stage.hashtags) ? stage.hashtags.slice() : []
+  }, getPlatform('x'));
+}
+
+function copyOutText(post, snap) {
+  if (copyOutAllParts(post, snap)) return copyOutFrozenParts(snap).join('\n\n');
+  return String(snap.text);
 }
 
 function paintCopyOut() {
@@ -1508,11 +1695,12 @@ function bindCopyOut(btn) {
     const post = getActive(state);
     const snap = post.lastPaste;
     if (!hasLastPaste(post)) return;
-    const blob = new Blob([String(snap.text)], { type: 'text/plain;charset=utf-8' });
+    const allParts = copyOutAllParts(post, snap);
+    const blob = new Blob([copyOutText(post, snap)], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = copyOutFilename(snap);
+    a.download = copyOutFilename(snap, allParts);
     a.rel = 'noopener';
     document.body.appendChild(a);
     a.click();

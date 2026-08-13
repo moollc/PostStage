@@ -1,10 +1,11 @@
 import { execSync, spawnSync, exec, spawn } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, statSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, createReadStream, statSync, readdirSync } from 'fs';
 import { createServer as createHttpsServer } from 'https';
 import { createServer as createHttpServer } from 'http';
-import { extname, resolve, dirname } from 'path';
+import { extname, resolve, dirname, relative } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import net from 'net';
+import { isSafeRelPath, parseByteRange } from '../../source/shared/media-link.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT  = resolve(__dir, '../..');
@@ -157,7 +158,9 @@ const MIME = {
   '.png': 'image/png',  '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml', '.webp': 'image/webp',
   '.woff2': 'font/woff2',  '.ico': 'image/x-icon',
-  '.wasm': 'application/wasm'
+  '.wasm': 'application/wasm',
+  '.webm': 'video/webm', '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime', '.m4v': 'video/mp4'
 };
 
 const { csp } = await import(pathToFileURL(resolve(ROOT, 'config/csp.config.js')).href);
@@ -270,6 +273,96 @@ function writeInboxPosts(posts) {
   writeFileSync(INBOX_FILE, JSON.stringify({ posts }, null, 2));
 }
 
+const MEDIA_WALK_SKIP = new Set(['node_modules', '.git', '.trash', 'target']);
+
+function resolveImageFile(relRaw) {
+  if (!isSafeRelPath(relRaw)) return null;
+  const rel = String(relRaw).replace(/\\/g, '/');
+  const abs = resolve(ROOT, rel);
+  const back = relative(ROOT, abs);
+  if (back && !back.startsWith('..') && existsSync(abs)) {
+    try {
+      if (statSync(abs).isFile()) return abs;
+    } catch { /* search by name */ }
+  }
+  const base = rel.split('/').pop();
+  const found = findMediaInRoot(base);
+  if (!found) return null;
+  const foundAbs = resolve(ROOT, found);
+  const foundBack = relative(ROOT, foundAbs);
+  if (!foundBack || foundBack.startsWith('..')) return null;
+  return foundAbs;
+}
+
+function findMediaInRoot(name, size) {
+  const want = String(name || '').replace(/\\/g, '/').split('/').pop();
+  if (!want || want === '.' || want === '..' || /Users|GoogleDrive|(^|\/)home(\/|$)/i.test(want)) {
+    return null;
+  }
+  const n = Number(size);
+  const matches = [];
+  let seen = 0;
+  function walk(dir, prefix) {
+    if (matches.length > 4 || seen > 4000) return;
+    let ents;
+    try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const ent of ents) {
+      if (MEDIA_WALK_SKIP.has(ent.name) || ent.name.startsWith('.')) continue;
+      const rel = prefix ? prefix + '/' + ent.name : ent.name;
+      if (!isSafeRelPath(rel)) continue;
+      const abs = resolve(dir, ent.name);
+      if (ent.isDirectory()) {
+        walk(abs, rel);
+        continue;
+      }
+      if (!ent.isFile() || ent.name !== want) continue;
+      seen += 1;
+      try {
+        const st = statSync(abs);
+        if (!Number.isFinite(n) || st.size === n) matches.push(rel);
+      } catch { /* skip */ }
+    }
+  }
+  walk(ROOT, '');
+  if (matches.length === 1) return matches[0];
+  return null;
+}
+
+function sendRangeFile(req, res, filePath) {
+  const st = statSync(filePath);
+  const size = st.size;
+  const mime = MIME[extname(filePath).toLowerCase()] || 'application/octet-stream';
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Content-Type', mime);
+  const parsed = parseByteRange(req.headers.range, size);
+  if (parsed.kind === 'unsat') {
+    res.statusCode = 416;
+    res.setHeader('Content-Range', `bytes */${size}`);
+    res.end();
+    return;
+  }
+  if (req.method === 'HEAD') {
+    if (parsed.kind === 'partial') {
+      res.statusCode = 206;
+      res.setHeader('Content-Range', `bytes ${parsed.start}-${parsed.end}/${size}`);
+      res.setHeader('Content-Length', parsed.end - parsed.start + 1);
+    } else {
+      res.setHeader('Content-Length', size);
+    }
+    res.end();
+    return;
+  }
+  if (parsed.kind === 'all') {
+    res.setHeader('Content-Length', size);
+    createReadStream(filePath).on('error', () => res.end()).pipe(res);
+    return;
+  }
+  res.statusCode = 206;
+  res.setHeader('Content-Range', `bytes ${parsed.start}-${parsed.end}/${size}`);
+  res.setHeader('Content-Length', parsed.end - parsed.start + 1);
+  createReadStream(filePath, { start: parsed.start, end: parsed.end }).on('error', () => res.end()).pipe(res);
+}
+
 const portArgIdx = args.indexOf('--port');
 const port = portArgIdx !== -1 ? parseInt(args[portArgIdx + 1]) : await findFreePort(7744);
 const swVersion = Date.now();
@@ -380,6 +473,29 @@ async function handleRequest(req, res) {
     }
     runHerdr(['pane', 'send-keys', target, 'enter']);
     return json(res, 200, { ok: true, target });
+  }
+
+  if (url.pathname === '/api/media/link' && req.method === 'POST') {
+    let payload;
+    try { payload = JSON.parse(await readBody(req)); } catch {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    const name = payload && payload.name;
+    const size = payload && payload.size;
+    const found = findMediaInRoot(name, size);
+    if (!found) return json(res, 404, { error: 'not_found' });
+    return json(res, 200, { path: found });
+  }
+
+  if (url.pathname === '/image' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const rel = url.searchParams.get('path') || '';
+    const abs = resolveImageFile(rel);
+    if (!abs) {
+      res.statusCode = 404;
+      res.end();
+      return;
+    }
+    return sendRangeFile(req, res, abs);
   }
 
   if (url.pathname === '/service-worker.js') {

@@ -1,6 +1,7 @@
 /**
  * Browser path: Copy out downloads lastPaste.text as a .txt (frozen paste,
- * not the live rail). Filename is synthetic (platform + part), no home paths.
+ * not the live rail). On an X thread it downloads every frozen 1/n part in
+ * one file. Filename is synthetic (platform + part, or platform-thread).
  * Disabled when there is no lastPaste. Run: npm run test:browser-copyout
  *
  * Attaches to http://127.0.0.1:7744 if that origin answers. Does not start a
@@ -15,6 +16,9 @@ const ORIGIN = 'http://127.0.0.1:7744';
 const HOOK = 'Copy-out frozen paste.';
 const LIVE = 'Live rail after copy — not the paste.';
 const NAME = /^x-part-0\.txt$/;
+const THREAD = 'H'.repeat(300);
+const THREAD_LIVE = 'W'.repeat(300);
+const THREAD_NAME = /^x-thread\.txt$/;
 
 function originAnswers(url) {
   return new Promise((resolve) => {
@@ -97,11 +101,10 @@ try {
   await page.waitForSelector('#f-hook', { timeout: 15000 });
   await page.fill('#f-hook', HOOK);
   await clickCopy(page);
-  await page.locator('#last-paste-chip').waitFor({ state: 'visible', timeout: 8000 });
   await page.waitForFunction(() => {
     const btn = document.getElementById('btn-copy-out');
     return Boolean(btn && !btn.disabled);
-  }, { timeout: 8000 });
+  }, undefined, { timeout: 8000 });
 
   await page.fill('#f-hook', LIVE);
   const liBtn = page.locator('#plats button', { hasText: /^LinkedIn$/ });
@@ -111,7 +114,7 @@ try {
       (b) => b.textContent.trim() === 'LinkedIn'
     );
     return btn && btn.getAttribute('aria-pressed') === 'true';
-  }, { timeout: 8000 });
+  }, undefined, { timeout: 8000 });
 
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 8000 }),
@@ -136,7 +139,62 @@ try {
     fail('Copy out wrote the live rail instead of lastPaste.text');
   }
 
-  console.log('ok    Copy out downloads the frozen paste as a synthetic .txt; disabled without lastPaste');
+  await page.locator('.board-new').click();
+  await waitHook(page, '');
+  if (await xBtn.count()) await xBtn.click();
+  await page.waitForFunction(() => {
+    const btn = [...document.querySelectorAll('#plats button')].find(
+      (b) => b.textContent.trim() === 'X'
+    );
+    return Boolean(btn && btn.getAttribute('aria-pressed') === 'true' && document.getElementById('f-hook'));
+  }, undefined, { timeout: 8000 });
+  await page.fill('#f-hook', THREAD);
+  await waitHook(page, THREAD);
+  await page.waitForFunction(() => {
+    const bar = document.getElementById('thread-bar');
+    const pos = document.getElementById('thread-pos');
+    return Boolean(bar && !bar.hidden && pos && /^1\/2\s*$/.test(pos.textContent.trim()));
+  }, undefined, { timeout: 8000 });
+  await clickCopy(page);
+  await page.locator('#thread-next').click();
+  await page.waitForFunction(() => {
+    const pos = document.getElementById('thread-pos');
+    return pos && /^2\/2\s*$/.test(pos.textContent.trim());
+  }, undefined, { timeout: 5000 });
+  await clickCopy(page);
+  await page.waitForFunction(() => {
+    const chip = document.getElementById('last-paste-chip');
+    return Boolean(chip && !chip.hidden && /2\/2/.test(chip.textContent || ''));
+  }, undefined, { timeout: 8000 });
+
+  await page.fill('#f-hook', THREAD_LIVE);
+  await waitHook(page, THREAD_LIVE);
+
+  const [threadDl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 8000 }),
+    out.click()
+  ]);
+  const threadName = threadDl.suggestedFilename();
+  if (!THREAD_NAME.test(threadName)) {
+    fail(`thread download name was ${JSON.stringify(threadName)}, expected x-thread.txt`);
+  }
+  if (/[/\\]|Users|home|GoogleDrive/i.test(threadName)) {
+    fail(`thread download name leaked a path: ${JSON.stringify(threadName)}`);
+  }
+  const threadPath = await threadDl.path();
+  if (!threadPath) fail('thread download had no path to read');
+  const threadBody = await readFile(threadPath, 'utf8');
+  if (!threadBody.includes('1/2') || !threadBody.includes('2/2')) {
+    fail(`thread Copy out missing 1/n marks: ${JSON.stringify(threadBody.slice(0, 80))}`);
+  }
+  if (!threadBody.includes('H'.repeat(40))) {
+    fail('thread Copy out missing the frozen H thread');
+  }
+  if (threadBody.includes('W'.repeat(40))) {
+    fail('thread Copy out rewrote from the live rail instead of formatThread of the snapshot');
+  }
+
+  console.log('ok    Copy out downloads the frozen paste; X thread is every frozen 1/n part in one .txt');
 } finally {
   await browser.close();
 }
