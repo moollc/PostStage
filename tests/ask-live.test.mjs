@@ -72,11 +72,12 @@ t('the brief carries publishedUrl when the post has one', () => {
   ok(out.includes(W1_PUBLISHED_URL), `href missing from:\n${out}`);
 });
 
-t('the href is on its own line, exactly once', () => {
-  const lines = hrefLines(brief({ publishedUrl: W1_PUBLISHED_URL }));
-  eq(lines.length, 1, `expected one href line, got ${lines.length}: ${JSON.stringify(lines)}`);
-  ok(lines[0].trim().endsWith(W1_PUBLISHED_URL), `href not at end of line: ${JSON.stringify(lines[0])}`);
-  ok(/^[A-Za-z][A-Za-z ]*:/.test(lines[0]), `line has no label: ${JSON.stringify(lines[0])}`);
+t('the href appears as its own labelled field line, exactly once', () => {
+  // The closer may also mention the href (see ask-open); the *field* line is
+  // the one this asserts — a labelled line ending in the url.
+  const field = hrefLines(brief({ publishedUrl: W1_PUBLISHED_URL }))
+    .filter((l) => l.trim().endsWith(W1_PUBLISHED_URL) && /^[A-Za-z][A-Za-z ]*:/.test(l));
+  eq(field.length, 1, `expected one href field line, got ${JSON.stringify(field)}`);
 });
 
 t('a messy but real url is normalized before it goes out', () => {
@@ -172,14 +173,51 @@ t('the existing brief lines still render', () => {
   for (const label of ['Who:', 'How we know:', 'Platform:', 'Hook:', 'Body:', 'Call:', 'Tags:', 'Unclaimed parts:', 'Heuristic:']) {
     ok(out.includes(label), `${label} missing`);
   }
-  ok(out.endsWith('Which part is not doing its job? One line.'), 'closing question kept last');
+  ok(/One line\.$/.test(out), 'a one-line closing question is kept last');
 });
 
-t('the href line sits before the closing question', () => {
+t('an unpublished brief still ends on the draft question', () => {
+  const out = brief({ publishedUrl: null });
+  ok(out.endsWith('Which part is not doing its job? One line.'), `ended with: ${JSON.stringify(out.split('\n').pop())}`);
+});
+
+t('the href field line sits before the closing question', () => {
   const lines = brief({ publishedUrl: W1_PUBLISHED_URL }).split('\n');
-  const live = lines.findIndex((l) => l.includes(W1_PUBLISHED_URL));
-  const ask = lines.findIndex((l) => l.startsWith('Which part'));
-  ok(live >= 0 && live < ask, `href at ${live}, question at ${ask}`);
+  const field = lines.findIndex((l) => /^[A-Za-z][A-Za-z ]*:/.test(l) && l.trim().endsWith(W1_PUBLISHED_URL));
+  ok(field >= 0, 'href field line present');
+  ok(field < lines.length - 1, `href field at ${field} of ${lines.length}, not before the closer`);
+});
+
+// --- closer tells the pane to open the href --------------------------------
+
+t('when publishedUrl is set, the last line tells the pane to open that href', () => {
+  const last = brief({ publishedUrl: W1_PUBLISHED_URL }).split('\n').pop();
+  ok(/^Open /i.test(last), `closer does not start with Open: ${JSON.stringify(last)}`);
+  ok(last.includes(W1_PUBLISHED_URL), 'closer omits the href');
+  ok(/Which part is not doing its job\? One line\.$/.test(last), 'still asks which part, one line');
+});
+
+t('when publishedUrl is missing, the last line is the draft closer', () => {
+  const last = brief({ publishedUrl: null }).split('\n').pop();
+  eq(last, 'Which part is not doing its job? One line.', 'draft closer');
+  ok(!/^Open /i.test(last), 'told the pane to open something');
+});
+
+t('the closer uses the normalized href, not junk or a query', () => {
+  const last = brief({
+    publishedUrl: 'https://www.twitter.com/Jayson_X/status/2087952991638716610?views=99&likes=1'
+  }).split('\n').pop();
+  ok(last.includes(W1_PUBLISHED_URL), 'canonical href in closer');
+  ok(!/twitter\.com|\?views=|\?likes=/i.test(last), 'raw host or query in closer');
+  ok(!/\bviews\b|\blikes\b/i.test(last), 'counts in closer');
+});
+
+t('a junk url does not put Open or a home path on the closer', () => {
+  for (const junk of ['javascript:alert(1)', '/Users/me/status/1', 'not a url']) {
+    const last = brief({ publishedUrl: junk }).split('\n').pop();
+    eq(last, 'Which part is not doing its job? One line.', `${junk} closer`);
+    ok(!/\/Users\//.test(last), `${junk} leaked a home path`);
+  }
 });
 
 console.log(failed ? `\n${failed} FAILED` : '\nall ask-live tests pass');
