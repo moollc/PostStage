@@ -75,8 +75,15 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 }
 .board-status { font-size: 0.68rem; padding: 0.18rem 0.4rem; }
 .board-status.published { border-color: var(--ok); color: var(--ok); }
+.board-src {
+  font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--amber); padding: 0 0.2rem 0 0;
+}
 .board-new { flex: none; font-size: 0.75rem; }
 .stage-status { margin: 0.2rem 0 0.35rem; font-size: 0.72rem; }
+.card.stage-card .outcome {
+  font-size: 0.8rem; margin: 0 0 0.35rem; padding: 0.28rem 0.4rem;
+}
 
 .idea-lane {
   position: absolute; left: 0; top: 2.6rem; bottom: 0; z-index: 3;
