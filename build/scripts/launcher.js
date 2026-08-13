@@ -102,11 +102,17 @@ if (!useHttps) {
   console.log('No mkcert / certs — serving HTTP on 127.0.0.1\n');
 }
 
-function findFreePort(start = 3000) {
+/** Loopback only. The launcher is local-first; nothing here is for the network. */
+const LISTEN_HOST = '127.0.0.1';
+
+// Probe on the same host the real server binds. Omitting it makes Node listen
+// on `::` (all interfaces), which briefly exposes the probe and, worse, tests
+// whether the port is free on the wrong interface.
+function findFreePort(start = 3000, host = LISTEN_HOST) {
   return new Promise(resolve => {
     const s = net.createServer();
-    s.listen(start, () => { const p = s.address().port; s.close(() => resolve(p)); });
-    s.on('error', () => resolve(findFreePort(start + 1)));
+    s.listen(start, host, () => { const p = s.address().port; s.close(() => resolve(p)); });
+    s.on('error', () => resolve(findFreePort(start + 1, host)));
   });
 }
 
@@ -380,7 +386,7 @@ const server = useHttps
   ? createHttpsServer({ cert: readFileSync(CERT), key: readFileSync(KEY) }, handleRequest)
   : createHttpServer(handleRequest);
 
-const listenHost = '127.0.0.1';
+const listenHost = LISTEN_HOST;
 server.listen(port, listenHost, () => {
   const url = useHttps ? `https://localhost:${port}` : `http://127.0.0.1:${port}`;
   console.log(`\n${url}\n`);
