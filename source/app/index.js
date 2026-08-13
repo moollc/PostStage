@@ -895,12 +895,17 @@ async function loadAgentDock() {
           flashKeep('No shop line');
           return;
         }
-        if (!addIdea(state, { text: line, source: 'shop' })) {
+        const idea = addIdea(state, { text: line, source: 'shop' });
+        if (!idea) {
           flashKeep('No shop line');
           return;
         }
         persist();
+        selectCard(idea.id);
         render();
+        const card = wrap.querySelector(`.card.idea[data-id="${idea.id}"]`);
+        const partSel = card && card.querySelector('select.idea-part');
+        if (partSel) partSel.focus();
       } catch {
         flashKeep('Keep failed');
       } finally {
