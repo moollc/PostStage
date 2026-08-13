@@ -28,6 +28,8 @@
     "test:browser-video-slot": "node tests/browser-video-slot.mjs",
     "test:browser-video-link": "node tests/browser-video-link.mjs",
     "test:browser-video-x": "node tests/browser-video-x.mjs",
+    "test:browser-stale": "node tests/browser-stale.mjs",
+    "test:health": "node tests/health.test.mjs",
     "test:video-link": "node tests/video-link.test.mjs",
     "test:ledger": "node tests/ledger.test.mjs",
     "test:inbox-still": "node tests/inbox-still.test.mjs",
@@ -36,6 +38,7 @@
     "test:browser-source": "node tests/browser-source.mjs",
     "test:park": "node tests/park.test.mjs",
     "test:nostore": "node tests/nostore.test.mjs",
+    "test:browser-health": "node tests/browser-health-safety.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
   },
   "dependencies": {},

@@ -5,7 +5,7 @@ import { structureFor, interactionsFor, monetizeFor, effectsFor, PARTS } from '/
 import { listAgents, sendAgent, readAgent, lastShopLine, shortCwd } from '/source/shared/agent-bridge.js';
 import { formatThread, isFinalThreadPart } from '/source/shared/export.js';
 import { formatStageBrief } from '/source/shared/brief.js';
-import { isSafeRelPath, mediaSrcForPath } from '/source/shared/media-link.js';
+import { isSafeRelPath, mediaSrcForPath, IMAGE_ROUTE_PROBE, imageRouteFromHealth, imageRouteFromProbe } from '/source/shared/media-link.js';
 import { formatLedger } from '/source/shared/ledger.js';
 import { compressStill, IMAGE_PERSIST_BUDGET } from '/source/shared/compress-still.js';
 import { inboxIdFromItem } from '/source/shared/inbox-id.js';
@@ -27,6 +27,8 @@ let spaceDown = false;
 const view = { x: 0, y: 0, scale: 1 };
 /** This-sitting blob URLs for clips that already have a persistable path/href. */
 const sessionClips = new Map();
+/** Whether the live launcher handles `/image?path=`. null until probed. */
+let imageRouteLive = null;
 
 /**
  * Save, then patch the one honest error line in place — no full render, so a
@@ -208,6 +210,7 @@ const MEDIA_LINKED_CLIP = 'Linked clip';
 const MEDIA_SESSION_ONLY = 'Session only';
 const LEAVES_ON_REFRESH = 'This picture leaves when you refresh';
 const SESSION_ONLY_CLIP = 'Session only — leaves on refresh';
+const STALE_IMAGE_HINT = 'Linked clip will not play after refresh';
 
 function mediaSessionOverlayText(m) {
   if (isVideoMedia(m)) return SESSION_ONLY_CLIP;
@@ -221,7 +224,38 @@ function mediaLeavesNote(m) {
 
 function mediaLinkedNote(m) {
   if (!m || !isVideoMedia(m) || !mediaPersists(m)) return '';
+  if (imageRouteLive === false) {
+    return `<span class="media-session media-stale">${escapeHtml(STALE_IMAGE_HINT)}</span>`;
+  }
   return `<span class="media-session media-linked">${MEDIA_LINKED_CLIP}</span>`;
+}
+
+async function probeImageRoute() {
+  try {
+    const h = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
+    if (h.ok) {
+      const data = await h.json();
+      if (imageRouteFromHealth(data)) {
+        imageRouteLive = true;
+        return;
+      }
+    }
+  } catch { /* probe the route */ }
+  try {
+    const href = mediaSrcForPath(IMAGE_ROUTE_PROBE);
+    const headers = { Range: 'bytes=0-0' };
+    const signal = AbortSignal.timeout(2000);
+    let r = await fetch(href, { method: 'HEAD', headers, signal });
+    if (r.status === 405 || r.status === 501) {
+      r = await fetch(href, { method: 'GET', headers, signal });
+    }
+    imageRouteLive = imageRouteFromProbe(r.status, {
+      'content-type': r.headers.get('content-type') || '',
+      'accept-ranges': r.headers.get('accept-ranges') || ''
+    });
+  } catch {
+    imageRouteLive = false;
+  }
 }
 
 function videoPreviewSrc(m) {
@@ -853,8 +887,11 @@ function bindStageMediaSlot(preview) {
   slot.tabIndex = 0;
   const attached = getActive(state).media && getActive(state).media[0];
   if (attached && mediaPersists(attached)) {
-    slot.setAttribute('aria-label', `${MEDIA_LINKED_CLIP} — replace image or video`);
-    slot.title = `${MEDIA_LINKED_CLIP} — click or drop an image or video`;
+    const linkedLabel = imageRouteLive === false && isVideoMedia(attached)
+      ? STALE_IMAGE_HINT
+      : MEDIA_LINKED_CLIP;
+    slot.setAttribute('aria-label', `${linkedLabel} — replace image or video`);
+    slot.title = `${linkedLabel} — click or drop an image or video`;
   } else if (attached && !mediaPersists(attached)) {
     const sess = mediaSessionOverlayText(attached);
     slot.setAttribute('aria-label', sess);
@@ -2017,6 +2054,7 @@ document.getElementById('btn-idea').addEventListener('click', () => addBlankIdea
 bindLiveCopy(document.getElementById('btn-export'));
 
 await loadPlatforms();
+await probeImageRoute();
 applyView();
 render();
 pullInbox();

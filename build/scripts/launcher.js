@@ -20,6 +20,7 @@ const CERTS = resolve(ROOT, 'build/certs');
 const CERT  = resolve(CERTS, 'localhost.pem');
 const KEY   = resolve(CERTS, 'localhost-key.pem');
 const MIN_NODE = 18;
+const STARTED_AT = new Date().toISOString();
 
 function checkToolchain(cmd, name, installCmd) {
   try {
@@ -223,6 +224,16 @@ function scoreBin() {
   if (existsSync(release)) return release;
   if (existsSync(debug)) return debug;
   return '';
+}
+
+function healthPayload() {
+  return {
+    ok: true,
+    herdr: herdrAvailable(),
+    rust: Boolean(scoreBin()),
+    imageRoute: true,
+    started: STARTED_AT
+  };
 }
 
 function normalizeAgents(parsed) {
@@ -449,8 +460,12 @@ async function handleRequest(req, res) {
   Object.entries(headers).forEach(([k, v]) => res.setHeader(k, v));
   const url = new URL(req.url || '/', baseOrigin);
 
+  if (url.pathname === '/health' && req.method === 'GET') {
+    return json(res, 200, healthPayload());
+  }
+
   if (url.pathname === '/api/health' && req.method === 'GET') {
-    return json(res, 200, { ok: true, herdr: herdrAvailable(), rust: Boolean(scoreBin()) });
+    return json(res, 200, healthPayload());
   }
 
   if (url.pathname === '/api/inbox' && req.method === 'GET') {

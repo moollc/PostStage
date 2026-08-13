@@ -23,6 +23,28 @@ export function mediaSrcForPath(path) {
   return '/image?path=' + encodeURIComponent(path.replace(/\\/g, '/'));
 }
 
+/** Dummy path for probing whether this process handles `/image`. Never a real file, never a home path. */
+export const IMAGE_ROUTE_PROBE = '__poststage_probe__';
+
+export function imageRouteFromHealth(data) {
+  return Boolean(data && data.imageRoute === true);
+}
+
+/**
+ * Classify GET/HEAD `/image?path=` of IMAGE_ROUTE_PROBE.
+ * Alive: 206, Accept-Ranges: bytes, or 404 (handler ran; dummy is not a file).
+ * Dead: 200 HTML (old static fallback).
+ */
+export function imageRouteFromProbe(status, headers = {}) {
+  const type = String(headers['content-type'] || headers.contentType || '').toLowerCase();
+  const accept = String(headers['accept-ranges'] || headers.acceptRanges || '');
+  const code = Number(status);
+  if (code === 206 || /bytes/i.test(accept)) return true;
+  if (code === 404) return true;
+  if (code === 200 && /html/.test(type)) return false;
+  return false;
+}
+
 export function parseByteRange(header, size) {
   const n = Number(size);
   if (!Number.isFinite(n) || n < 0) return { kind: 'unsat' };

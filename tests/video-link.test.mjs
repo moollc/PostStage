@@ -3,7 +3,7 @@
  * Run: npm run test:video-link
  */
 
-import { isSafeRelPath, mediaSrcForPath, parseByteRange } from '../source/shared/media-link.js';
+import { isSafeRelPath, mediaSrcForPath, parseByteRange, IMAGE_ROUTE_PROBE, imageRouteFromHealth, imageRouteFromProbe } from '../source/shared/media-link.js';
 
 let failed = 0;
 function ok(cond, msg) {
@@ -33,6 +33,18 @@ const unsat = parseByteRange('bytes=500-10', 100);
 ok(unsat.kind === 'unsat', 'inverted range is unsatisfiable');
 const open = parseByteRange('bytes=50-', 100);
 ok(open.kind === 'partial' && open.start === 50 && open.end === 99, 'open end');
+
+ok(isSafeRelPath(IMAGE_ROUTE_PROBE), 'probe dummy is a safe rel path');
+ok(!/Users|home|GoogleDrive/i.test(IMAGE_ROUTE_PROBE), 'probe dummy has no home path');
+ok(
+  mediaSrcForPath(IMAGE_ROUTE_PROBE) === '/image?path=' + encodeURIComponent(IMAGE_ROUTE_PROBE),
+  'probe src is /image?path= dummy'
+);
+ok(imageRouteFromHealth({ imageRoute: true }), 'health imageRoute true is live');
+ok(!imageRouteFromHealth({ ok: true, herdr: false, rust: false }), 'old health without imageRoute is not live');
+ok(imageRouteFromProbe(206, { 'accept-ranges': 'bytes' }), '206 is live');
+ok(imageRouteFromProbe(404, {}), '404 dummy is live (handler ran)');
+ok(!imageRouteFromProbe(200, { 'content-type': 'text/html; charset=utf-8' }), '200 HTML is dead static fallback');
 
 if (failed) {
   console.log(failed + ' failed');
