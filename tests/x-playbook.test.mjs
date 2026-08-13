@@ -91,6 +91,22 @@ t('practices tell the operator to write something worth pasting', () => {
   ok(/dm|paste|copy/.test(lines), 'no line about pasting or DMs');
 });
 
+t('practices do not sell first-ten or first-hour as a rank', () => {
+  const lines = interactionsFor('x').practices.join(' | ').toLowerCase();
+  ok(!/first ten|first 10|first hour/.test(lines), 'early-reply folklore still billed as a rank');
+  ok(!/\+15|percent|%/.test(lines), 'an invented rate on the practice');
+});
+
+t('the guest-reply practice is manners, not a mixer weight', () => {
+  const lines = interactionsFor('x').practices;
+  const line = lines.find((p) => /host|guest/i.test(p));
+  ok(line, 'host/guest manners line missing');
+  ok(/manners/i.test(line), `manners lost: ${line}`);
+  ok(/not a for you weight/i.test(line), `still reads as a feed claim: ${line}`);
+  ok(/follow each other|mutual/i.test(line), `mutuals missing: ${line}`);
+  ok(!/carries extra weight|extra weight/i.test(line), `still claims a weight: ${line}`);
+});
+
 t('the ten-second video floor is stated as a floor, not a target', () => {
   const all = (interactionsFor('x').practices.join(' ') + ' ' + xText).toLowerCase();
   ok(/ten second|10s|duration floor/.test(all), 'video duration floor not mentioned');

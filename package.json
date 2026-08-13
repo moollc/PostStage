@@ -53,6 +53,7 @@
     "test:ask-open": "node tests/ask-open.test.mjs",
     "test:browser-ask-live": "node tests/browser-ask-live.mjs",
     "test:x-playbook": "node tests/x-playbook.test.mjs",
+    "test:x-first-ten": "node tests/x-first-ten.test.mjs",
     "test:nostore": "node tests/nostore.test.mjs",
     "test:browser-health": "node tests/browser-health-safety.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
