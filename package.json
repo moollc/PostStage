@@ -9,6 +9,7 @@
     "build": "node build/scripts/build-web.js",
     "verify": "node scripts/verify-workspace.mjs",
     "test:store": "node tests/store.test.mjs",
+    "test:score": "node tests/score-parity.test.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
   },
   "dependencies": {},

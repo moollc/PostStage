@@ -1,0 +1,157 @@
+{
+  "_comment": "Shared score fixtures. Both engines must agree on `score` and `band` for every case. Read by tests/score-parity.test.mjs (JS + the Rust CLI) and by build/score/tests/fixtures.rs (the Rust lib directly). Add a case here and both sides pick it up. `passed` is how many of the 8 checks should pass, kept so a fixture that drifts is obvious.",
+  "cases": [
+    {
+      "name": "perfect post, exact fraction",
+      "why": "8/8 = 100 exactly; agreed even before the rounding fix",
+      "post": {
+        "hook": "Ship the thing today",
+        "body": "A long enough body to keep a stranger reading past the first line of it.",
+        "cta": "Reply with the one metric you track",
+        "tag_count": 2,
+        "media_count": 1,
+        "platform": "x",
+        "platform_label": "X",
+        "max_chars": 280,
+        "has_best_form": true,
+        "best_form": "Short claim + proof + one question"
+      },
+      "passed": 8,
+      "score": 100,
+      "band": "ready"
+    },
+    {
+      "name": "three of eight, the original off-by-one",
+      "why": "3/8 = 37.5. JS Math.round gave 38, integer truncation gave 37. THIS is the case that failed yesterday.",
+      "post": {
+        "hook": "Hi",
+        "body": "short",
+        "cta": "Click here",
+        "tag_count": 7,
+        "media_count": 0,
+        "platform": "instagram",
+        "platform_label": "Instagram",
+        "max_chars": 2200,
+        "has_best_form": true,
+        "best_form": "Visual first, caption as a story with a save-worthy closer"
+      },
+      "passed": 3,
+      "score": 38,
+      "band": "thin"
+    },
+    {
+      "name": "seven of eight, hook echoes the cta",
+      "why": "7/8 = 87.5. JS 88, truncation 87. Also exercises hook-cta-echo failing alone.",
+      "post": {
+        "hook": "Reply with the one metric you track",
+        "body": "A long enough body to keep a stranger reading past the first line of it.",
+        "cta": "Reply with your metric",
+        "tag_count": 1,
+        "media_count": 1,
+        "platform": "x",
+        "platform_label": "X",
+        "max_chars": 280,
+        "has_best_form": true,
+        "best_form": "Short claim + proof + one question"
+      },
+      "passed": 7,
+      "score": 88,
+      "band": "ready"
+    },
+    {
+      "name": "seven of eight, over the character ceiling",
+      "why": "Same 7/8 arithmetic reached a different way — length fails instead of echo.",
+      "post": {
+        "hook": "A perfectly fine hook here",
+        "body": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+        "cta": "Tell me what broke",
+        "tag_count": 0,
+        "media_count": 0,
+        "platform": "x",
+        "platform_label": "X",
+        "max_chars": 280,
+        "has_best_form": true,
+        "best_form": "Short claim + proof + one question"
+      },
+      "passed": 7,
+      "score": 88,
+      "band": "ready"
+    },
+    {
+      "name": "six of eight, no bestForm",
+      "why": "6/8 = 75 exactly. Divides evenly, so it agreed even with the bug — the control case.",
+      "post": {
+        "hook": "A perfectly fine hook here",
+        "body": "A long enough body to keep a stranger reading past the first line of it.",
+        "cta": "Tell me what broke",
+        "tag_count": 0,
+        "media_count": 0,
+        "platform": "tiktok",
+        "platform_label": "TikTok",
+        "max_chars": 4000,
+        "has_best_form": false,
+        "best_form": ""
+      },
+      "passed": 6,
+      "score": 75,
+      "band": "draft"
+    },
+    {
+      "name": "four of eight, band edge from below",
+      "why": "4/8 = 50 exactly. Sits under the 55 draft threshold, so a one-point drift would not move the band but would move the number.",
+      "post": {
+        "hook": "A perfectly fine hook",
+        "body": "short",
+        "cta": "Click here",
+        "tag_count": 9,
+        "media_count": 0,
+        "platform": "instagram",
+        "platform_label": "Instagram",
+        "max_chars": 2200,
+        "has_best_form": true,
+        "best_form": "Visual first, caption as a story with a save-worthy closer"
+      },
+      "passed": 4,
+      "score": 50,
+      "band": "thin"
+    },
+    {
+      "name": "five of eight, straddles the draft threshold",
+      "why": "5/8 = 62.5. JS 63, truncation 62. Both land in draft, but the number differs — the kind of drift a band-only assertion misses.",
+      "post": {
+        "hook": "A perfectly fine hook here",
+        "body": "A long enough body to keep a stranger reading past the first line of it.",
+        "cta": "Click here",
+        "tag_count": 9,
+        "media_count": 0,
+        "platform": "instagram",
+        "platform_label": "Instagram",
+        "max_chars": 2200,
+        "has_best_form": true,
+        "best_form": "Visual first, caption as a story with a save-worthy closer"
+      },
+      "passed": 5,
+      "score": 63,
+      "band": "draft"
+    },
+    {
+      "name": "empty post",
+      "why": "The state the canvas opens in. Scores 5/8 = 62.5 (JS 63, truncation 62), because an empty post still passes hook-cta-echo, length, media-on-x, tags and form. Worth knowing: a blank draft already reads as `draft`, not `thin`.",
+      "post": {
+        "hook": "",
+        "body": "",
+        "cta": "",
+        "tag_count": 0,
+        "media_count": 0,
+        "platform": "x",
+        "platform_label": "X",
+        "max_chars": 280,
+        "has_best_form": true,
+        "best_form": "Short claim + proof + one question"
+      },
+      "passed": 5,
+      "score": 63,
+      "band": "draft"
+    }
+  ]
+}
