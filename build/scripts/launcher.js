@@ -73,14 +73,44 @@ function mkcertInstallHint() {
   }[process.platform] || 'https://github.com/FiloSottile/mkcert/releases';
 }
 
+/**
+ * True when HTTPS is usable. Never throws: a missing mkcert, an unwritable
+ * trust store, a broken CA, or a full disk all degrade to `false` so the
+ * launcher can serve HTTP instead of dying on first run.
+ */
 function setupHttpsCerts() {
   if (!mkcertInstalled()) return false;
   if (certValid()) return true;
   console.log('Setting up local HTTPS certs...');
-  execSync('mkcert -install', { stdio: 'inherit' });
-  generateCerts();
+  try {
+    execSync('mkcert -install', { stdio: 'inherit' });
+    generateCerts();
+  } catch (err) {
+    // Message only — never the command or paths, which carry the home directory.
+    console.warn(`Could not create local certs: ${certFailureReason(err)}`);
+    return false;
+  }
   console.log('Certs ready.\n');
   return certValid();
+}
+
+/**
+ * Short, path-free reason for a cert failure.
+ *
+ * The fallback used to try to redact paths out of `err.message` with a
+ * regex, but a path containing a space (e.g. this workspace's own "My
+ * Drive" folder) breaks the non-whitespace match into two runs and leaves
+ * the bare word between them — "Drive" — sitting in the output unredacted.
+ * Selective stripping can't be made safe against every quoting/spacing
+ * shape a spawned command might produce, so the fallback omits the raw
+ * message rather than trying to sanitize it.
+ */
+function certFailureReason(err) {
+  const code = err && err.code;
+  if (code === 'EACCES' || code === 'EPERM') return 'permission denied';
+  if (code === 'ENOSPC') return 'no space left on device';
+  if (code === 'ENOENT') return 'mkcert could not be run';
+  return 'mkcert or cert generation failed';
 }
 
 const args = process.argv.slice(2);
@@ -92,14 +122,19 @@ if (certsOnly) {
     console.error(`\nmkcert not found. Install it:\n  ${mkcertInstallHint()}\n`);
     process.exit(1);
   }
-  if (!certValid()) setupHttpsCerts();
+  // Generating certs is the whole job of this flag, so a failure is fatal here
+  // even though the normal start path degrades to HTTP.
+  if (!certValid() && !setupHttpsCerts()) {
+    console.error('Could not create local certs.');
+    process.exit(1);
+  }
   console.log('certs ready');
   process.exit(0);
 }
 
 const useHttps = setupHttpsCerts();
 if (!useHttps) {
-  console.log('No mkcert / certs — serving HTTP on 127.0.0.1\n');
+  console.log('No mkcert / certs cannot be created — serving HTTP on 127.0.0.1\n');
 }
 
 /** Loopback only. The launcher is local-first; nothing here is for the network. */
