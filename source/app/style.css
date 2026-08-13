@@ -515,6 +515,10 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
   margin: 0.28rem 0 0;
   font-size: 0.72rem;
 }
+.guest-scan-hint.guest-scan-stale {
+  color: var(--amber);
+  letter-spacing: 0.02em;
+}
 
 .idea-lane {
   grid-column: 1;

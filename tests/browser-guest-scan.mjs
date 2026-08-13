@@ -139,13 +139,17 @@ try {
   const hint = page.locator('#guest-scan-hint');
   await hint.waitFor({ state: 'visible', timeout: 8000 });
   const before = String(await hint.textContent() || '');
-  if (!before.includes("wouldn't post a video") && !before.includes('Scan failed')) {
-    fail(`hint after reload was ${JSON.stringify(before)}`);
+  if (routeLive) {
+    if (!before.includes("wouldn't post a video") && !before.includes('Scan failed')) {
+      fail(`hint after reload was ${JSON.stringify(before)}`);
+    }
+  } else if (!/launcher is restarted/i.test(before) && !before.includes("wouldn't post a video") && !/Scan failed/i.test(before)) {
+    fail(`dead-route hint after reload was ${JSON.stringify(before)}`);
   }
   if (/26 views|likes|replies/i.test(before)) fail(`hint painted counts: ${JSON.stringify(before)}`);
 
-  await page.locator('#btn-guest-scan').click();
   if (routeLive) {
+    await page.locator('#btn-guest-scan').click();
     await page.waitForFunction(() => {
       const t = String(document.getElementById('guest-scan-hint')?.textContent || '');
       return t.length > 0;
@@ -153,15 +157,15 @@ try {
   } else {
     await page.waitForFunction(() => {
       const t = String(document.getElementById('guest-scan-hint')?.textContent || '');
-      return /Scan failed/i.test(t);
+      return /launcher is restarted|Scan failed/i.test(t);
     }, undefined, { timeout: 15000 });
   }
   const after = String(await hint.textContent() || '');
   if (routeLive) {
     if (!after.trim()) fail('live scan left the hint empty');
     if (/fxtwitter/i.test(after)) fail('hint mentioned fxtwitter');
-  } else if (!/Scan failed — last snapshot kept/i.test(after) && !/Scan failed/i.test(after)) {
-    fail(`dead route hint was ${JSON.stringify(after)}, expected fail + last snapshot`);
+  } else if (!/launcher is restarted/i.test(after) && !/Scan failed — last snapshot kept/i.test(after) && !/Scan failed/i.test(after)) {
+    fail(`dead route hint was ${JSON.stringify(after)}, expected restart hint or fail + last snapshot`);
   }
 
   const stored = await page.evaluate(() => {

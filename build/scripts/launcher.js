@@ -275,6 +275,7 @@ function healthPayload() {
     herdr: herdrAvailable(),
     rust: Boolean(scoreBin()),
     imageRoute: true,
+    guestScanRoute: true,
     started: STARTED_AT
   };
 }
