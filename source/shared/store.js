@@ -14,8 +14,9 @@
  * { note, recordedAt } — an operator's record of what actually happened, kept
  * deliberately separate from the heuristic score.
  *
- * `lastPaste` is `null` or `{ text, platformId, partIndex, at }` — the exact
+ * `lastPaste` is `null` or `{ text, platformId, partIndex, at, stage? }` — the exact
  * string that last landed on the clipboard. Written only on successful Copy.
+ * `stage` is hook/body/cta/hashtags at that Copy, for formatThread of the snapshot.
  * Rail edits must not touch it. What happened? is about this snapshot.
  *
  * `stageUndo` is `null` or `{ hook, body, cta }` — the previous stage copy
@@ -30,6 +31,8 @@
  * while the UI is rewired. Both are live views, not copies — mutating
  * `state.post.hook` mutates the active post. Prefer `getActive(state)`.
  */
+
+import { isSafeRelPath, mediaSrcForPath } from './media-link.js';
 
 const KEY = 'poststage.v2';
 const LEGACY_KEY = 'poststage.v1';
@@ -127,7 +130,19 @@ function normalizeLastPaste(value) {
   const rawIndex = value.partIndex;
   const partIndex = Number.isFinite(rawIndex) ? Math.max(0, Math.floor(rawIndex)) : 0;
   const at = typeof value.at === 'string' && value.at ? value.at : null;
-  return { text, platformId, partIndex, at };
+  const next = { text, platformId, partIndex, at };
+  const stage = value.stage;
+  if (stage && typeof stage === 'object') {
+    next.stage = {
+      hook: typeof stage.hook === 'string' ? stage.hook : '',
+      body: typeof stage.body === 'string' ? stage.body : '',
+      cta: typeof stage.cta === 'string' ? stage.cta : '',
+      hashtags: Array.isArray(stage.hashtags)
+        ? stage.hashtags.map((t) => String(t ?? '')).filter(Boolean)
+        : []
+    };
+  }
+  return next;
 }
 
 function normalizeStageUndo(value) {
@@ -174,23 +189,63 @@ function isLegacy(data) {
 }
 
 /**
- * Repair a board that parsed but is not internally consistent: missing fields,
- * an empty list, or an `activeId` pointing at a post that is gone.
- */
-/**
- * Whether this attachment would survive save/load. Blobs and over-budget
- * files (attach stores those as blobs) are dropped. Small `data:image/` URLs stay.
+ * Whether this attachment would survive save/load.
+ * Blobs and `data:video` are dropped. Small `data:image/` URLs stay.
+ * A project-relative `path` (or `/image?path=`) stays. Home paths do not.
  */
 export function mediaPersists(m) {
   if (!m || typeof m !== 'object') return false;
   const url = String(m.url || '');
-  if (!url || /^blob:/i.test(url)) return false;
-  return true;
+  const href = String(m.href || '');
+  const path = String(m.path || '');
+  if (/^blob:/i.test(url) || /^blob:/i.test(href)) return false;
+  if (/^data:video/i.test(url) || /^data:video/i.test(href)) return false;
+  const blob = `${path} ${url} ${href}`;
+  if (/Users|GoogleDrive|(^|\/)home(\/|$)/i.test(blob)) return false;
+  if (path) return isSafeRelPath(path);
+  const link = href || url;
+  if (/^data:image/i.test(link)) return true;
+  if (/^\/image\?path=/i.test(link)) {
+    try {
+      const q = new URL(link, 'http://127.0.0.1').searchParams.get('path') || '';
+      return isSafeRelPath(q);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function freezeMediaLink(m) {
+  if (!m || typeof m !== 'object') return m;
+  const pathRaw = String(m.path || '');
+  const url = String(m.url || '');
+  const href = String(m.href || '');
+  let path = isSafeRelPath(pathRaw) ? pathRaw.replace(/\\/g, '/') : '';
+  if (!path) {
+    const link = /^\/image\?path=/i.test(href) ? href : (/^\/image\?path=/i.test(url) ? url : '');
+    if (link) {
+      try {
+        const q = new URL(link, 'http://127.0.0.1').searchParams.get('path') || '';
+        if (isSafeRelPath(q)) path = q.replace(/\\/g, '/');
+      } catch { /* keep empty */ }
+    }
+  }
+  if (!path) return { name: m.name, type: m.type, url, href, path: '', session: m.session };
+  const src = mediaSrcForPath(path);
+  return {
+    name: m.name,
+    type: m.type,
+    path,
+    href: src,
+    url: src,
+    session: false
+  };
 }
 
 function persistableMedia(list) {
   if (!Array.isArray(list)) return [];
-  return list.filter(mediaPersists);
+  return list.map(freezeMediaLink).filter(mediaPersists);
 }
 
 function normalize(board) {
@@ -348,6 +403,7 @@ export function setLastPaste(state, id, snap) {
     text: snap && snap.text,
     platformId: snap && snap.platformId,
     partIndex: snap && snap.partIndex,
+    stage: snap && snap.stage,
     at: new Date().toISOString()
   });
   if (!next) return post;

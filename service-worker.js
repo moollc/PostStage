@@ -33,6 +33,7 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.pathname.startsWith('/api/')) return;
+  if (url.pathname === '/image') return;
   event.respondWith(
     fetch(event.request).catch(() => caches.match(event.request)),
   );

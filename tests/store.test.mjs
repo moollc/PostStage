@@ -713,6 +713,50 @@ t('a blob url is dropped on persist, and the copy stays text only either way', (
   eq(formatPost(back, getPlatform('x')), 'Most posts fail before the second line.', 'copy unchanged after reload');
 });
 
+t('data:video does not persist; a project-relative video path does', () => {
+  eq(store.mediaPersists({ type: 'video/webm', url: 'data:video/webm;base64,xx' }), false, 'no data:video');
+  eq(store.mediaPersists({
+    type: 'video/webm',
+    path: '/Users/me/clip.webm',
+    url: '/image?path=/Users/me/clip.webm'
+  }), false, 'no home path');
+  eq(store.mediaPersists({
+    type: 'video/webm',
+    path: 'tests/tiny-link.webm',
+    url: '/image?path=tests%2Ftiny-link.webm'
+  }), true, 'relative path stays');
+  eq(store.mediaPersists({
+    type: 'video/webm',
+    href: '/image?path=tests%2Ftiny-x.webm'
+  }), true, 'href-only /image?path= stays');
+  eq(store.mediaPersists({ type: 'image/png', url: 'data:image/png;base64,xx' }), true, 'small image still stays');
+});
+
+t('save keeps a video link as path+href, not a blob or data:video', () => {
+  const s = loadState();
+  const p = getActive(s);
+  p.media = [{
+    name: 'tiny-x.webm',
+    type: 'video/webm',
+    path: 'tests/tiny-x.webm',
+    href: '/image?path=tests%2Ftiny-x.webm',
+    url: 'blob:http://127.0.0.1:7744/dead',
+    session: false
+  }];
+  saveState(s);
+  const raw = JSON.parse(mem.get(KEY));
+  const stored = ((raw.posts || [])[0] || {}).media || [];
+  eq(stored.length, 1, 'one media kept');
+  eq(stored[0].path, 'tests/tiny-x.webm', 'path kept');
+  eq(stored[0].href, '/image?path=tests%2Ftiny-x.webm', 'href is /image?path=');
+  eq(stored[0].url, '/image?path=tests%2Ftiny-x.webm', 'url rewritten off the blob');
+  ok(!/^blob:/i.test(JSON.stringify(stored)), 'no blob in saved media');
+  ok(!/^data:video/i.test(String(stored[0].url || '')), 'no data:video');
+  const back = getActive(loadState());
+  eq(back.media[0].path, 'tests/tiny-x.webm', 'reload path');
+  eq(back.media[0].href, '/image?path=tests%2Ftiny-x.webm', 'reload href');
+});
+
 // --- outcome: clears on empty, never reaches the heuristic ----------------
 
 // getPlatform is already imported above for the media/paste tests.

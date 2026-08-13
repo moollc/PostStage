@@ -23,6 +23,11 @@
     "test:browser-board": "node tests/browser-board-copied.mjs",
     "test:browser-noted": "node tests/browser-board-noted.mjs",
     "test:browser-copyout": "node tests/browser-copy-out.mjs",
+    "test:browser-board-list": "node tests/browser-board-list.mjs",
+    "test:browser-video-slot": "node tests/browser-video-slot.mjs",
+    "test:browser-video-link": "node tests/browser-video-link.mjs",
+    "test:browser-video-x": "node tests/browser-video-x.mjs",
+    "test:video-link": "node tests/video-link.test.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
   },
   "dependencies": {},
