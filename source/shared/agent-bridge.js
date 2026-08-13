@@ -78,8 +78,9 @@ const SHOP_UNSAFE = [
   /(^|\/)home\/[^/\s]+/i,
   /[A-Za-z]:\\Users\\/i,
   /GoogleDrive|OneDrive|Dropbox|iCloud/i,
-  // A bare absolute path or a file:// url, whatever it points at.
-  /(^|\s)(~|\.{0,2})\/[^\s]{6,}/,
+  // A home-relative or dot-relative path. A lone `/` in copy is not a path
+  // (`make the hook /snappier` must Keep). `/Users/` and `/home/` are above.
+  /(^|\s)(~\/|\.\/|\.\.\/)/,
   /file:\/\//i,
   // An address is someone's identity even when it is the operator's own.
   /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/,
