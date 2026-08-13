@@ -22,6 +22,8 @@ npm start
 
 Flags: `--dev` (relaxed CSP), `--no-open` (do not open a browser), `--certs-only` (generate certs and exit; requires mkcert), `--port N`.
 
+After `npm i`, `node scripts/verify-workspace.mjs` should exit 0; a local `node_modules` is expected.
+
 ## Layout
 
 - One canvas: idea cards + the stage card (the post)

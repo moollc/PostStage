@@ -42,6 +42,35 @@ function mustNotExist(rel, label = rel, base = ROOT) {
   if (existsSync(join(base, rel))) errors.push(`Should not be in repo: ${label} (${rel})`);
 }
 
+// A clone never gets a gitignored folder; a real machine does after `npm i`.
+// So this is a git-tracking question, not a disk-presence one: pass if the
+// path is absent, or present but ignored/untracked. Fail only if git would
+// actually ship it — already tracked, or unignored and would be picked up
+// by `git add`.
+function mustNotBeTracked(rel, label = rel, base = ROOT) {
+  if (!existsSync(join(base, rel))) return;
+  const ignored = spawnSync('git', ['check-ignore', '-q', rel], {
+    cwd: base,
+    shell: process.platform === 'win32',
+  });
+  if (ignored.status === 0) {
+    if (rel === 'node_modules') {
+      console.log('  · node_modules present locally (ignored by git — not a verify failure)');
+    }
+    return;
+  }
+  const tracked = spawnSync('git', ['ls-files', '--error-unmatch', rel], {
+    cwd: base,
+    shell: process.platform === 'win32',
+    stdio: 'ignore',
+  });
+  if (tracked.status === 0) {
+    errors.push(`Tracked in git, should not be: ${label} (${rel})`);
+    return;
+  }
+  errors.push(`Not gitignored and would be committed: ${label} (${rel})`);
+}
+
 function nonEmptyFile(abs, label) {
   if (!existsSync(abs)) {
     errors.push(`Missing: ${label}`);
@@ -135,7 +164,7 @@ function checkVanilla() {
   mustExist('source/shared/permissions.js');
   mustExist('source/shared/file-bridge.js');
   mustNotExist('build/certs');
-  mustNotExist('node_modules');
+  mustNotBeTracked('node_modules');
   checkScaffoldNotInsideRepo();
   checkGitBoundary();
   checkHooksPath();
@@ -149,7 +178,7 @@ function checkVite() {
     existsSync(join(ROOT, p)),
   );
   if (!srcMain) errors.push('Missing: src/main.jsx (or main.js / main.tsx)');
-  mustNotExist('node_modules');
+  mustNotBeTracked('node_modules');
   checkScaffoldNotInsideRepo();
   checkGitBoundary();
 
