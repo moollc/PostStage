@@ -1,5 +1,5 @@
 import { loadPlatforms, getPlatforms, getPlatform } from '/source/shared/platforms.js';
-import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, addIdea, rememberStageWrite, undoStageWrite } from '/source/shared/store.js';
+import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, setLastPaste, addIdea, rememberStageWrite, undoStageWrite } from '/source/shared/store.js';
 import { scorePostMaybeWasm } from '/source/shared/score.js';
 import { structureFor, interactionsFor, monetizeFor, effectsFor, PARTS } from '/source/shared/playbook.js';
 import { listAgents, sendAgent, readAgent, lastShopLine, shortCwd } from '/source/shared/agent-bridge.js';
@@ -15,6 +15,7 @@ let state = loadState();
 if (state.ideaLayout !== 'stack' && state.ideaLayout !== 'free') state.ideaLayout = 'stack';
 let copiedIds = new Set();
 const threadCursor = { key: '', index: 0 };
+let railSeq = 0;
 let selected = 'stage';
 let drag = null;
 let pan = null;
@@ -156,18 +157,30 @@ function charLabel(platform, used) {
 function isImageMedia(m) {
   if (!m || !m.url) return false;
   if (m.type && m.type.startsWith('image/')) return true;
-  return /\.(png|jpe?g|gif|webp|svg|bmp)(\?|$)/i.test(m.url);
+  const url = String(m.url);
+  if (url.startsWith('data:image/')) return true;
+  return /\.(png|jpe?g|gif|webp|svg|bmp)(\?|$)/i.test(url);
 }
 
 function isVideoMedia(m) {
   if (!m || !m.url) return false;
   if (m.type && m.type.startsWith('video/')) return true;
-  return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(m.url);
+  const url = String(m.url);
+  if (url.startsWith('data:video/')) return true;
+  return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
+}
+
+function isUsableBlob(m) {
+  return Boolean(m && m.session && /^blob:/i.test(String(m.url || '')));
 }
 
 function mediaSlotHtml(media) {
   const m = media && media[0];
   if (!m || !m.url) {
+    return '<span class="media-placeholder">Click or drop an image<span class="media-session">Session only</span></span>';
+  }
+  // Blob URLs die on reload. A stored blob must not render as a picture.
+  if (/^blob:/i.test(m.url) && !isUsableBlob(m)) {
     return '<span class="media-placeholder">Click or drop an image<span class="media-session">Session only</span></span>';
   }
   if (isImageMedia(m)) {
@@ -528,13 +541,25 @@ function bindOutcomeField(how, post) {
   });
 }
 
+function lastPasteChipText(snap) {
+  if (!snap || !snap.text) return '';
+  return String(snap.text).replace(/\s+/g, ' ').trim();
+}
+
 function paintOutcomePrompt() {
   const box = document.getElementById('outcome-prompt');
   const input = document.getElementById('f-outcome');
+  const chip = document.getElementById('last-paste-chip');
   if (!box || !input) return;
   const post = getActive(state);
   const show = shouldShowOutcome(post);
   box.hidden = !show;
+  const line = show ? lastPasteChipText(post.lastPaste) : '';
+  if (chip) {
+    chip.hidden = !line;
+    chip.textContent = line;
+    chip.title = line;
+  }
   if (!show) return;
   input.value = (post.outcome && post.outcome.note) || '';
 }
@@ -902,12 +927,17 @@ function bindStageUndo() {
 }
 
 async function renderRail() {
-  const post = state.post;
+  const seq = ++railSeq;
+  const post = getActive(state);
+  paintOutcomePrompt();
   const platform = getPlatform(post.platform);
   const scored = await scorePostMaybeWasm(post);
+  if (seq !== railSeq) return;
   const inter = interactionsFor(post.platform);
   const money = monetizeFor(post.platform);
   const effects = effectsFor(post.platform);
+  const showOutcome = shouldShowOutcome(post);
+  const chipLine = showOutcome ? lastPasteChipText(post.lastPaste) : '';
 
   rail.innerHTML = `
     <h2>Edit</h2>
@@ -938,9 +968,14 @@ async function renderRail() {
       <button type="button" id="thread-prev">Prev part</button>
       <button type="button" id="thread-next">Next part</button>
     </div>
-    <div id="outcome-prompt" class="outcome-prompt"${shouldShowOutcome(post) ? '' : ' hidden'}>
-      <label class="hint outcome-prompt-label" for="f-outcome">What happened?</label>
-      <input id="f-outcome" type="text" class="outcome-rail" value="${escapeHtml((post.outcome && post.outcome.note) || '')}" placeholder="What you saw — optional" aria-label="What happened?">
+    <div class="outcome-block" id="outcome-block">
+      <div class="outcome-prompt-head">
+        <label class="hint outcome-prompt-label" for="f-outcome">What happened?</label>
+        <span id="last-paste-chip" class="last-paste"${chipLine ? '' : ' hidden'}>${escapeHtml(chipLine)}</span>
+      </div>
+      <div id="outcome-prompt" class="outcome-prompt"${showOutcome ? '' : ' hidden'}>
+        <input id="f-outcome" type="text" class="outcome-rail" value="${escapeHtml((post.outcome && post.outcome.note) || '')}" placeholder="What you saw — optional" aria-label="What happened?">
+      </div>
     </div>
 
     <h2>Structure · what each part does</h2>
@@ -980,6 +1015,8 @@ async function renderRail() {
       <button type="button" id="stage-cut" class="stage-cut" hidden aria-label="Restore displaced copy"></button>
     </div>
   `;
+
+  if (seq !== railSeq) return;
 
   const partsEl = rail.querySelector('#parts');
   paintStructure(partsEl);
@@ -1178,11 +1215,18 @@ function bindLiveCopy(btn) {
         return;
       }
       await navigator.clipboard.writeText(text);
+      const post = getActive(state);
       const parts = liveThread(state.post, platform);
+      setLastPaste(state, post.id, {
+        text,
+        platformId: platform.id,
+        partIndex: threadCursor.index
+      });
+      persist();
       if (isFinalThreadPart(threadCursor.index, parts.length)) {
-        copiedIds.add(getActive(state).id);
-        paintOutcomePrompt();
+        copiedIds.add(post.id);
       }
+      paintOutcomePrompt();
       const partLabel = threadChromeLabel();
       if (partLabel) flash(`Copied · ${partLabel}`, 'copied');
       else if (text.length > (platform.maxChars || 0)) flash('Copied · over limit', 'warn');

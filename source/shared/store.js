@@ -14,6 +14,10 @@
  * { note, recordedAt } — an operator's record of what actually happened, kept
  * deliberately separate from the heuristic score.
  *
+ * `lastPaste` is `null` or `{ text, platformId, partIndex, at }` — the exact
+ * string that last landed on the clipboard. Written only on successful Copy.
+ * Rail edits must not touch it. What happened? is about this snapshot.
+ *
  * `stageUndo` is `null` or `{ hook, body, cta }` — the previous stage copy
  * before the last Use-on-stage or rail overwrite of those fields. One slot,
  * not a history. `rememberStageWrite` / `undoStageWrite` own it.
@@ -54,6 +58,7 @@ function blankPost(overrides = {}) {
     publishedAt: null,
     source: DEFAULT_SOURCE,
     outcome: null,
+    lastPaste: null,
     ideas: [],
     stageUndo: null,
     ...overrides
@@ -114,6 +119,17 @@ function normalizeOutcome(value) {
   return { note, recordedAt: typeof at === 'string' && at ? at : null };
 }
 
+function normalizeLastPaste(value) {
+  if (!value || typeof value !== 'object') return null;
+  const text = typeof value.text === 'string' ? value.text : String(value.text ?? '');
+  if (!text) return null;
+  const platformId = typeof value.platformId === 'string' ? value.platformId : '';
+  const rawIndex = value.partIndex;
+  const partIndex = Number.isFinite(rawIndex) ? Math.max(0, Math.floor(rawIndex)) : 0;
+  const at = typeof value.at === 'string' && value.at ? value.at : null;
+  return { text, platformId, partIndex, at };
+}
+
 function normalizeStageUndo(value) {
   if (!value || typeof value !== 'object') return null;
   return {
@@ -166,7 +182,7 @@ function persistableMedia(list) {
   return list.filter((m) => {
     if (!m || typeof m !== 'object') return false;
     const url = String(m.url || '');
-    if (!url || url.startsWith('blob:')) return false;
+    if (!url || /^blob:/i.test(url)) return false;
     return true;
   });
 }
@@ -184,6 +200,7 @@ function normalize(board) {
       // Boards written before source/outcome existed pick up the defaults here.
       source: normalizeSource(p.source),
       outcome: normalizeOutcome(p.outcome),
+      lastPaste: normalizeLastPaste(p.lastPaste),
       stageUndo: normalizeStageUndo(p.stageUndo)
     }));
   if (!posts.length) posts.push(blankPost());
@@ -266,6 +283,7 @@ export function addPost(state, overrides = {}) {
   const post = blankPost(overrides);
   post.source = normalizeSource(post.source);
   post.outcome = normalizeOutcome(post.outcome);
+  post.lastPaste = normalizeLastPaste(post.lastPaste);
   post.stageUndo = normalizeStageUndo(post.stageUndo);
   state.posts.push(post);
   state.activeId = post.id;
@@ -314,6 +332,24 @@ export function setPublished(state, id, published) {
 }
 
 /**
+ * Snapshot the string that just went to the clipboard. Replaces the one slot.
+ * Does not touch outcome, hook, body, or cta. Returns the post, or null.
+ */
+export function setLastPaste(state, id, snap) {
+  const post = state.posts.find((p) => p.id === id);
+  if (!post) return null;
+  const next = normalizeLastPaste({
+    text: snap && snap.text,
+    platformId: snap && snap.platformId,
+    partIndex: snap && snap.partIndex,
+    at: new Date().toISOString()
+  });
+  if (!next) return post;
+  post.lastPaste = next;
+  return post;
+}
+
+/**
  * Record what actually happened to a post — the observed result, in the
  * operator's words. Stamps `recordedAt` when a note is first written.
  *
@@ -322,6 +358,7 @@ export function setPublished(state, id, published) {
  * id is unknown.
  *
  * This is a record, not a score: nothing here feeds the heuristic.
+ * What happened? is about `lastPaste`, not the live rail.
  */
 export function setOutcome(state, id, note) {
   const post = state.posts.find((p) => p.id === id);
@@ -386,5 +423,5 @@ export const __testing = {
   blank, blankPost, migrate, normalize, withViews, isBoard, isLegacy,
   normalizeSource, normalizeOutcome, DEFAULT_SOURCE,
   normalizeIdeaSource, normalizeIdeas, DEFAULT_IDEA_SOURCE, KEY, LEGACY_KEY,
-  normalizeStageUndo
+  normalizeStageUndo, normalizeLastPaste
 };
