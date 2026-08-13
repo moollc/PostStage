@@ -10,6 +10,7 @@ import { formatLedger } from '/source/shared/ledger.js';
 import { compressStill, IMAGE_PERSIST_BUDGET } from '/source/shared/compress-still.js';
 import { inboxIdFromItem } from '/source/shared/inbox-id.js';
 import { normalizePublishedUrl, W1_POST_ID, W1_PUBLISHED_URL } from '/source/shared/published-url.js';
+import { copyLiveText, canCopyLive } from '/source/shared/copy-live-url.js';
 
 const canvas = document.getElementById('canvas');
 const wrap = canvas.parentElement;
@@ -733,7 +734,43 @@ function bindPublishedUrlField(el, post) {
     persist();
     scheduleJudgement();
     paintGuestScan();
+    paintCopyLink();
     if (getActive(state).publishedUrl) runGuestScan(getActive(state));
+  });
+}
+
+function paintCopyLink() {
+  const btn = document.getElementById('btn-copy-link');
+  if (!btn) return;
+  btn.disabled = !canCopyLive(getActive(state).publishedUrl);
+}
+
+function bindCopyLink(btn) {
+  if (!btn || btn.dataset.copyLinkBound) return;
+  btn.dataset.copyLinkBound = '1';
+  const idle = btn.textContent || 'Copy link';
+  btn.addEventListener('click', async () => {
+    const flash = (label, kind) => {
+      btn.textContent = label;
+      btn.classList.remove('copied', 'failed', 'saved');
+      if (kind) btn.classList.add(kind);
+      clearTimeout(btn._copyLinkT);
+      btn._copyLinkT = setTimeout(() => {
+        btn.textContent = idle;
+        btn.classList.remove('copied', 'failed', 'saved');
+      }, 1000);
+    };
+    const href = copyLiveText(getActive(state).publishedUrl);
+    if (!href) {
+      flash('No URL');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(href);
+      flash('Copied link', 'saved');
+    } catch {
+      flash('Copy failed', 'failed');
+    }
   });
 }
 
@@ -1402,8 +1439,11 @@ async function renderRail() {
         <input id="f-outcome" type="text" class="outcome-rail" value="${escapeHtml((post.outcome && post.outcome.note) || '')}" placeholder="What you saw — optional" aria-label="What happened?">
       </div>
       <label class="hint published-url-label" for="f-published-url">Live URL</label>
-      <input id="f-published-url" type="url" class="published-url-rail" value="${escapeHtml(post.publishedUrl || '')}" placeholder="https://x.com/…/status/…" aria-label="Published URL">
-      <button type="button" id="btn-guest-scan"${post.publishedUrl ? '' : ' hidden'}>Scan</button>
+      <div class="published-url-row">
+        <input id="f-published-url" type="url" class="published-url-rail" value="${escapeHtml(post.publishedUrl || '')}" placeholder="https://x.com/…/status/…" aria-label="Published URL">
+        <button type="button" id="btn-copy-link" class="copy-link-btn"${canCopyLive(post.publishedUrl) ? '' : ' disabled'} aria-label="Copy live URL to clipboard">Copy link</button>
+        <button type="button" id="btn-guest-scan"${post.publishedUrl ? '' : ' hidden'}>Scan</button>
+      </div>
       <p id="guest-scan-hint" class="hint guest-scan-hint" hidden></p>
     </div>
 
@@ -1468,7 +1508,9 @@ async function renderRail() {
   const outcomeInput = rail.querySelector('#f-outcome');
   if (outcomeInput) bindOutcomeField(outcomeInput, post);
   bindPublishedUrlField(rail.querySelector('#f-published-url'), post);
+  bindCopyLink(rail.querySelector('#btn-copy-link'));
   bindGuestScan(rail.querySelector('#btn-guest-scan'));
+  paintCopyLink();
   paintGuestScan();
   paintOutcomePrompt();
   paintSaveError();

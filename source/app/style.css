@@ -471,6 +471,44 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
   margin: 0.35rem 0 0.22rem;
   font-size: 0.72rem;
 }
+.published-url-row {
+  display: flex;
+  align-items: center;
+  gap: 0.32rem;
+  min-width: 0;
+}
+.published-url-row .published-url-rail {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+#btn-copy-link,
+#btn-guest-scan {
+  flex: none;
+  font-size: 0.62rem;
+  line-height: var(--btn-line);
+  letter-spacing: 0.02em;
+  padding: 0.14rem 0.32rem;
+  min-height: var(--btn-hit-min);
+  white-space: nowrap;
+}
+#btn-copy-link:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+#btn-copy-link:disabled:hover {
+  border-color: var(--line);
+  color: inherit;
+}
+#btn-copy-link.copied,
+#btn-copy-link.saved {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+#btn-copy-link.failed {
+  border-color: var(--bad);
+  color: var(--bad);
+}
 #btn-guest-scan[hidden] { display: none; }
 .guest-scan-hint[hidden] { display: none; }
 .guest-scan-hint {
