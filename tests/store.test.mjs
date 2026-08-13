@@ -96,6 +96,20 @@ t('save then load round-trips the board', () => {
   eq(getActive(back).title, 'Second', 'active is the new post');
 });
 
+t('ideaLayout defaults to stack and round-trips', () => {
+  eq(loadState().ideaLayout, 'stack', 'default stack');
+  const s = loadState();
+  s.ideaLayout = 'free';
+  saveState(s);
+  eq(loadState().ideaLayout, 'free', 'free persisted');
+});
+
+t('unknown ideaLayout falls back to stack', () => {
+  const s = loadState();
+  mem.set(KEY, JSON.stringify({ activeId: s.activeId, posts: s.posts, ideaLayout: 'grid' }));
+  eq(loadState().ideaLayout, 'stack', 'coerced');
+});
+
 t('addPost appends a draft and makes it active', () => {
   const s = loadState();
   const first = s.activeId;
@@ -191,7 +205,8 @@ t('the compatibility views are not serialized', () => {
   const s = loadState();
   saveState(s);
   const raw = JSON.parse(mem.get(KEY));
-  eq(Object.keys(raw).sort(), ['activeId', 'posts'], 'only board keys stored');
+  eq(Object.keys(raw).sort(), ['activeId', 'ideaLayout', 'posts'], 'only board keys stored');
+  ok(!('post' in raw) && !('ideas' in raw), 'v1 view names are not stored');
 });
 
 // --- source ---------------------------------------------------------------
