@@ -466,8 +466,17 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
   grid-template-columns: 1fr 1fr;
   gap: 0.35rem;
   margin-top: 0.35rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 0.5rem 0 0.35rem;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -10px 22px #0e1014cc;
 }
 .agent-actions #agent-send { grid-column: 1 / -1; }
+.agent-actions #agent-ask { grid-column: 1; }
+.agent-actions #agent-keep { grid-column: 2; }
 .agent-actions button {
   min-width: 0;
   font-size: 0.75rem;
