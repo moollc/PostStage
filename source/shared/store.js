@@ -23,6 +23,16 @@
  * before the last Use-on-stage or rail overwrite of those fields. One slot,
  * not a history. `rememberStageWrite` / `undoStageWrite` own it.
  *
+ * `state.saveError` is `null` or `'quota'` — set by `saveState` when
+ * `localStorage.setItem` throws `QuotaExceededError` (browsers vary: check
+ * both `err.name` and the legacy `err.code === 22`). Not part of the persisted
+ * shape; it is a live flag on the in-memory `state` object so a caller can
+ * read it right after calling `saveState` without threading a return value
+ * through every call site. `saveState` also returns `true`/`false` for the
+ * same result, for callers that prefer that over reading the flag. A quota
+ * failure must never look like a successful save — no field is written to
+ * localStorage that the previous, still-actually-saved state does not have.
+ *
  * v1 stored a single `{ post, ideas }`. That is migrated on read, not dropped —
  * see `migrate()`. The v1 key is left in place so a downgrade does not lose work.
  *
@@ -315,13 +325,35 @@ export function loadState() {
   }
 }
 
+function isQuotaError(err) {
+  return Boolean(err && (err.name === 'QuotaExceededError' || err.code === 22));
+}
+
+/**
+ * Write `state` to localStorage. Returns `true` on success, `false` on a
+ * quota failure — never throws for that case, and never claims success when
+ * the write did not happen. `state.saveError` is set to `'quota'` (and left
+ * for the caller to read) on failure, cleared to `null` on the next success,
+ * so a caller that already has the `state` reference does not have to thread
+ * the return value through. A non-quota error (corrupt data, disabled
+ * storage) still throws — this only softens the one failure mode that is
+ * expected to happen in normal use.
+ */
 export function saveState(state) {
   const board = isBoard(state) ? normalize(state) : normalize(migrate(state));
-  localStorage.setItem(KEY, JSON.stringify({
-    activeId: board.activeId,
-    posts: board.posts,
-    ideaLayout: board.ideaLayout === 'free' ? 'free' : 'stack'
-  }));
+  try {
+    localStorage.setItem(KEY, JSON.stringify({
+      activeId: board.activeId,
+      posts: board.posts,
+      ideaLayout: board.ideaLayout === 'free' ? 'free' : 'stack'
+    }));
+  } catch (err) {
+    if (!isQuotaError(err)) throw err;
+    if (state && typeof state === 'object') state.saveError = 'quota';
+    return false;
+  }
+  if (state && typeof state === 'object') state.saveError = null;
+  return true;
 }
 
 /** The active post. Never null — normalize guarantees at least one post. */

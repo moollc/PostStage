@@ -8,19 +8,45 @@
   --ok: #7dcea0;
   --bad: #d98980;
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --btn-pad-y: 0.22rem;
+  --btn-pad-x: 0.45rem;
+  --btn-radius: 5px;
+  --btn-font: 0.8125rem;
+  --btn-line: 1.25;
+  --btn-hit-min: 24px;
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font); }
-button, input, textarea {
-  font: inherit; color: inherit; background: #12151b; border: 1px solid var(--line); border-radius: 8px;
+button:not(#btn-copy-out), input, textarea {
+  font: inherit; color: inherit; background: #12151b; border: 1px solid var(--line); border-radius: var(--btn-radius);
 }
-button { cursor: pointer; padding: 0.4rem 0.7rem; }
+button:not(#btn-copy-out) {
+  cursor: pointer;
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  font-size: var(--btn-font);
+  line-height: var(--btn-line);
+  min-height: var(--btn-hit-min);
+}
 button:hover { border-color: var(--amber); }
 button.primary { background: var(--amber); color: #1a1206; border-color: var(--amber); }
 button.armed { background: #5a2420; border-color: var(--bad); color: #fff; }
 textarea { width: 100%; min-height: 4.5rem; resize: vertical; padding: 0.5rem; }
 input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
+
+.plats button {
+  font-size: var(--btn-font);
+  line-height: var(--btn-line);
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  min-height: var(--btn-hit-min);
+}
+#btn-idea,
+#btn-export {
+  font-size: var(--btn-font);
+  line-height: var(--btn-line);
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  min-height: var(--btn-hit-min);
+}
 
 .top {
   display: flex; align-items: center; gap: 1rem; padding: 0.6rem 1rem;
@@ -64,9 +90,6 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 #btn-export.failed, #agent-copy.failed, .stage-copy.failed { border-color: var(--bad); color: var(--bad); }
 #btn-export.warn, #agent-copy.warn, .stage-copy.warn { border-color: var(--amber); color: var(--amber); }
 #btn-export.primary { font-weight: 600; }
-#btn-copy-out { font-size: 0.78rem; }
-#btn-copy-out:disabled { opacity: 0.45; cursor: default; }
-#btn-copy-out:disabled:hover { border-color: var(--line); }
 
 .stage-actions { display: flex; gap: 0.35rem; margin-top: 0.45rem; }
 .stage-copy {
@@ -994,6 +1017,30 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
 .check { font-size: 0.8rem; margin: 0.2rem 0; }
 .check.ok { color: var(--ok); }
 .check.no { color: var(--bad); }
+
+/* Read-only outcome ledger. Below Marketability; not the chip row. */
+#outcome-ledger { display: grid; gap: 0.3rem; }
+.ledger-row {
+  display: grid; gap: 0.1rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--line); border-radius: 6px;
+  font-size: 0.75rem;
+}
+.ledger-row.here { border-color: var(--amber); }
+.ledger-title { font-weight: 600; }
+.ledger-band {
+  justify-self: start;
+  font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.ledger-band.ready { color: var(--ok); }
+.ledger-band.thin { color: var(--bad); }
+.ledger-paste, .ledger-note {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ink);
+}
+.ledger-note { color: var(--amber); }
+.ledger-paste.none, .ledger-note.none { color: var(--muted); font-style: italic; }
 #score-block,
 #checks { scroll-margin-bottom: 5.75rem; }
 .list { margin: 0; padding-left: 1.1rem; font-size: 0.85rem; }
@@ -1002,6 +1049,7 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 0.35rem;
+  align-items: start;
   margin-top: 0.35rem;
   position: sticky;
   bottom: 0;
@@ -1039,9 +1087,12 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
 .agent-actions button:disabled:hover { border-color: var(--line); }
 .agent-actions button {
   min-width: 0;
-  font-size: 0.75rem;
-  padding: 0.38rem 0.45rem;
+  font-size: var(--btn-font);
+  line-height: var(--btn-line);
+  padding: var(--btn-pad-y) var(--btn-pad-x);
+  min-height: var(--btn-hit-min);
   white-space: nowrap;
+  align-self: start;
 }
 .agent { font-size: 0.8rem; padding: 0.35rem 0.45rem; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: baseline; }
 .agent.sel { border-color: var(--ok); }
