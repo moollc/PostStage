@@ -92,6 +92,18 @@ try {
   await waitHook(page, '');
 
   const out = page.locator('#btn-copy-out');
+  const home = await out.evaluate((el) => ({
+    inHead: Boolean(el.closest('.outcome-prompt-head')),
+    inHeader: Boolean(el.closest('header')),
+    afterChip: Boolean(el.previousElementSibling && el.previousElementSibling.id === 'last-paste-chip'),
+    headerCopyOut: Boolean(document.querySelector('header #btn-copy-out'))
+  }));
+  if (!home.inHead || !home.afterChip) {
+    fail('Copy out was not on the last-paste chip row');
+  }
+  if (home.inHeader || home.headerCopyOut) {
+    fail('Copy out was still in the header');
+  }
   if (!(await out.isDisabled())) {
     fail('Copy out was enabled on a new post with no lastPaste');
   }
@@ -137,6 +149,14 @@ try {
   }
   if (body.includes(LIVE)) {
     fail('Copy out wrote the live rail instead of lastPaste.text');
+  }
+
+  const afterCopy = await out.evaluate((el) => ({
+    inHead: Boolean(el.closest('.outcome-prompt-head')),
+    inHeader: Boolean(el.closest('header'))
+  }));
+  if (!afterCopy.inHead || afterCopy.inHeader) {
+    fail('after Copy, Copy out was not on the chip row');
   }
 
   await page.locator('.board-new').click();

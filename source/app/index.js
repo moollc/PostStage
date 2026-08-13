@@ -6,6 +6,7 @@ import { listAgents, sendAgent, readAgent, lastShopLine, shortCwd } from '/sourc
 import { formatThread, isFinalThreadPart } from '/source/shared/export.js';
 import { formatStageBrief } from '/source/shared/brief.js';
 import { isSafeRelPath, mediaSrcForPath } from '/source/shared/media-link.js';
+import { formatLedger } from '/source/shared/ledger.js';
 
 const canvas = document.getElementById('canvas');
 const wrap = canvas.parentElement;
@@ -25,8 +26,30 @@ const view = { x: 0, y: 0, scale: 1 };
 /** This-sitting blob URLs for clips that already have a persistable path/href. */
 const sessionClips = new Map();
 
+/**
+ * Save, then patch the one honest error line in place — no full render, so a
+ * failed save while mid-keystroke does not also drop the caret. Callers do
+ * not need to check the return value themselves; the line updates on its own.
+ */
 function persist() {
   saveState(state);
+  paintSaveError();
+}
+
+function paintSaveError() {
+  const existing = document.getElementById('save-error');
+  if (state.saveError === 'quota') {
+    if (existing) return;
+    const h2 = rail.querySelector('h2');
+    if (!h2) return;
+    const p = document.createElement('p');
+    p.className = 'hint no-score';
+    p.id = 'save-error';
+    p.textContent = 'Storage is full — this change is not saved. Remove a picture or clip, then try again.';
+    h2.insertAdjacentElement('afterend', p);
+  } else if (existing) {
+    existing.remove();
+  }
 }
 
 function ideaLayout() {
@@ -591,6 +614,8 @@ function bindOutcomeField(how, post) {
     setOutcome(state, post.id, how.value);
     persist();
     paintBoard();
+    // The ledger reads outcome; without this it stays stale until a full render.
+    scheduleJudgement();
   });
 }
 
@@ -1151,6 +1176,7 @@ async function renderRail() {
       <div class="outcome-prompt-head">
         <label class="hint outcome-prompt-label" for="f-outcome">What happened?</label>
         <span id="last-paste-chip" class="last-paste"${chipLine ? '' : ' hidden'}${chipPlat ? ` data-platform="${escapeHtml(chipPlat)}"` : ''}>${escapeHtml(chipLine)}</span>
+        <button type="button" id="btn-copy-out" disabled aria-label="Copy out frozen paste to a file">Copy out</button>
       </div>
       <div id="outcome-prompt" class="outcome-prompt"${showOutcome ? '' : ' hidden'}>
         <input id="f-outcome" type="text" class="outcome-rail" value="${escapeHtml((post.outcome && post.outcome.note) || '')}" placeholder="What you saw — optional" aria-label="What happened?">
@@ -1164,6 +1190,9 @@ async function renderRail() {
     <h2>Marketability <span class="badge heuristic">heuristic</span></h2>
     <div id="score-block"></div>
     <div id="checks"></div>
+
+    <h2>What went out</h2>
+    <div id="outcome-ledger"></div>
 
     <h2>Interactions to expect</h2>
     <ul class="list">${inter.expect.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
@@ -1214,6 +1243,8 @@ async function renderRail() {
   const outcomeInput = rail.querySelector('#f-outcome');
   if (outcomeInput) bindOutcomeField(outcomeInput, post);
   paintOutcomePrompt();
+  paintSaveError();
+  bindCopyOut(document.getElementById('btn-copy-out'));
   paintJudgement(scored);
 
   rail.querySelector('#f-file').addEventListener('change', (e) => {
@@ -1336,6 +1367,43 @@ function paintJudgement(scored) {
   }
   if (partsEl) paintStructure(partsEl);
   paintPasteView();
+  paintLedger(scored);
+}
+
+/**
+ * Read-only list of what went out: frozen paste, the operator's own note, and
+ * the band **only** for the active post, whose score was already computed for
+ * the rail above. The ledger never calls the scorer — other posts simply show
+ * no band rather than triggering a scoring pass, and no rate is ever derived.
+ */
+function paintLedger(scored) {
+  const box = rail.querySelector('#outcome-ledger');
+  if (!box) return;
+
+  const active = getActive(state);
+  const scoreById = scored && scored.band ? { [active.id]: { band: scored.band } } : null;
+  const rows = formatLedger(state.posts, scoreById);
+
+  if (!rows.length) {
+    box.innerHTML = '<p class="hint">Nothing copied or noted yet. Copy a post, then say what happened.</p>';
+    return;
+  }
+
+  box.innerHTML = rows.map((row) => {
+    const band = row.band ? `<span class="ledger-band ${escapeHtml(row.band)}">${escapeHtml(row.band)}</span>` : '';
+    const paste = row.paste
+      ? `<span class="ledger-paste" title="${escapeHtml(row.paste)}">${escapeHtml(row.paste)}</span>`
+      : '<span class="ledger-paste none">not copied yet</span>';
+    const note = row.note
+      ? `<span class="ledger-note" title="${escapeHtml(row.note)}">${escapeHtml(row.note)}</span>`
+      : '<span class="ledger-note none">no note yet</span>';
+    const here = row.id === active.id ? ' here' : '';
+    return `<div class="ledger-row${here}" data-id="${escapeHtml(row.id)}">
+      <span class="ledger-title">${escapeHtml(row.title)}</span>${band}
+      ${paste}
+      ${note}
+    </div>`;
+  }).join('');
 }
 
 function paintPasteView() {
@@ -1706,6 +1774,9 @@ function bindCopyOut(btn) {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    btn.classList.add('saved');
+    clearTimeout(btn._copyOutSaved);
+    btn._copyOutSaved = setTimeout(() => btn.classList.remove('saved'), 1000);
   });
 }
 
@@ -1864,7 +1935,6 @@ function render() {
 document.getElementById('btn-idea').addEventListener('click', () => addBlankIdea());
 
 bindLiveCopy(document.getElementById('btn-export'));
-bindCopyOut(document.getElementById('btn-copy-out'));
 
 await loadPlatforms();
 applyView();

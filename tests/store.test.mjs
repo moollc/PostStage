@@ -6,12 +6,22 @@
  */
 
 const mem = new Map();
+let throwOnSet = null; // set to an Error to make the next setItem(s) throw it
 globalThis.localStorage = {
   getItem: (k) => (mem.has(k) ? mem.get(k) : null),
-  setItem: (k, v) => mem.set(k, String(v)),
+  setItem: (k, v) => {
+    if (throwOnSet) throw throwOnSet;
+    mem.set(k, String(v));
+  },
   removeItem: (k) => mem.delete(k),
   clear: () => mem.clear()
 };
+
+function quotaException() {
+  const err = new Error('The quota has been exceeded.');
+  err.name = 'QuotaExceededError';
+  return err;
+}
 
 const store = await import('../source/shared/store.js');
 const { loadState, saveState, getActive, setActive, addPost, setPublished, __testing } = store;
@@ -20,6 +30,7 @@ const { KEY, LEGACY_KEY } = __testing;
 let failed = 0;
 function t(name, fn) {
   mem.clear();
+  throwOnSet = null;
   try {
     fn();
     console.log('ok    ' + name);
@@ -870,6 +881,88 @@ t('the scorer never reads lastPaste', () => {
   eq(after.checks, clean.checks, 'checks identical');
   ok(!('lastPaste' in clean), 'scorePost does not echo lastPaste');
   ok(!clean.checks.some((c) => /paste|reach|impress/i.test(c.id + c.note)), 'no paste metrics in checks');
+});
+
+// --- quota honesty ----------------------------------------------------------
+// A `QuotaExceededError` from localStorage.setItem must never look like a
+// successful save. saveState must not throw it, and must not pretend the
+// write happened.
+
+t('saveState returns true and clears saveError on an ordinary save', () => {
+  const s = loadState();
+  const ok1 = saveState(s);
+  ok(ok1 === true, 'saveState returns true on success');
+  ok(s.saveError === null, 'saveError is null after a successful save');
+});
+
+t('a QuotaExceededError does not throw out of saveState', () => {
+  const s = loadState();
+  throwOnSet = quotaException();
+  let threw = false;
+  let result;
+  try {
+    result = saveState(s);
+  } catch {
+    threw = true;
+  }
+  ok(!threw, 'saveState must not throw a quota error out to the caller');
+  ok(result === false, 'saveState returns false when the write did not happen');
+});
+
+t('a QuotaExceededError sets state.saveError to "quota", not a lie', () => {
+  const s = loadState();
+  throwOnSet = quotaException();
+  saveState(s);
+  eq(s.saveError, 'quota', 'saveError names the failure');
+});
+
+t('the previously-saved data is not overwritten by a failed save', () => {
+  const s = loadState();
+  const p = getActive(s);
+  p.hook = 'first hook, actually saved';
+  saveState(s);
+  const savedRaw = mem.get(KEY);
+
+  p.hook = 'second hook, never saved';
+  throwOnSet = quotaException();
+  saveState(s);
+
+  eq(mem.get(KEY), savedRaw, 'storage still holds the last real save, not a partial or newer write');
+  ok(!mem.get(KEY).includes('never saved'), 'the failed write did not sneak into storage some other way');
+});
+
+t('a non-quota error still throws — only quota is softened', () => {
+  const s = loadState();
+  throwOnSet = new Error('disk full, not a quota error');
+  throwOnSet.name = 'SomeOtherError';
+  let threw = false;
+  try {
+    saveState(s);
+  } catch {
+    threw = true;
+  }
+  ok(threw, 'a non-quota storage error still propagates — this is not a blanket try/catch');
+});
+
+t('saveState recognizes the legacy code === 22 quota shape too', () => {
+  const s = loadState();
+  const err = new Error('QUOTA_EXCEEDED_ERR');
+  err.code = 22;
+  throwOnSet = err;
+  const result = saveState(s);
+  ok(result === false, 'code 22 is treated as a quota error');
+  eq(s.saveError, 'quota', 'saveError is set for the legacy shape too');
+});
+
+t('saveError clears on the next successful save after a quota failure', () => {
+  const s = loadState();
+  throwOnSet = quotaException();
+  saveState(s);
+  eq(s.saveError, 'quota', 'set after the failure');
+
+  throwOnSet = null;
+  saveState(s);
+  eq(s.saveError, null, 'cleared after the next real save succeeds');
 });
 
 console.log(failed ? `\n${failed} FAILED` : '\nall store tests pass');

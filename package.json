@@ -28,6 +28,7 @@
     "test:browser-video-link": "node tests/browser-video-link.mjs",
     "test:browser-video-x": "node tests/browser-video-x.mjs",
     "test:video-link": "node tests/video-link.test.mjs",
+    "test:ledger": "node tests/ledger.test.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
   },
   "dependencies": {},
