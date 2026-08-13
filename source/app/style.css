@@ -163,7 +163,7 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 #thread-bar:not([hidden])[data-final="0"] + .outcome-block #outcome-prompt:not([hidden]):has(.outcome-rail:placeholder-shown) {
   display: none;
 }
-.outcome-block:not(:has(#last-paste-chip:not(:empty))):has(#outcome-prompt[hidden]) {
+.outcome-block:not(:has(#last-paste-chip[data-platform], #last-paste-chip:not(:empty))):has(#outcome-prompt[hidden]) {
   margin: 0;
 }
 /* Reload: persisted lastPaste + outcome value stay visible (beat [hidden] / paint) */
@@ -171,10 +171,10 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
   display: block !important;
 }
 /* No lastPaste: empty chip is the signal — hide paste chrome and outcome field */
-.outcome-block:not(:has(#last-paste-chip:not(:empty))) #last-paste-chip,
-.outcome-block:not(:has(#last-paste-chip:not(:empty))) #outcome-prompt,
-.outcome-block:not(:has(#last-paste-chip:not(:empty))) #f-outcome,
-.outcome-block:not(:has(#last-paste-chip:not(:empty))) .outcome-prompt-label {
+.outcome-block:not(:has(#last-paste-chip[data-platform], #last-paste-chip:not(:empty))) #last-paste-chip,
+.outcome-block:not(:has(#last-paste-chip[data-platform], #last-paste-chip:not(:empty))) #outcome-prompt,
+.outcome-block:not(:has(#last-paste-chip[data-platform], #last-paste-chip:not(:empty))) #f-outcome,
+.outcome-block:not(:has(#last-paste-chip[data-platform], #last-paste-chip:not(:empty))) .outcome-prompt-label {
   display: none !important;
 }
 .outcome-prompt-label {
@@ -194,6 +194,10 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
   margin: 0;
   flex: none;
 }
+.outcome-prompt-head:has(#last-paste-chip[data-platform], #last-paste-chip:not(:empty)) {
+  flex-wrap: wrap;
+  gap: 0.28rem 0.35rem;
+}
 .last-paste {
   font-size: 0.62rem;
   letter-spacing: 0.02em;
@@ -209,9 +213,19 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
   flex: 1;
   min-width: 0;
 }
-.last-paste:empty { display: none; }
+.last-paste:empty:not([data-platform]) { display: none; }
+#last-paste-chip[data-platform],
 #last-paste-chip:not(:empty) {
   display: block !important;
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 0;
+}
+#last-paste-chip[data-platform]::before {
+  content: attr(data-platform) " · ";
+  color: var(--amber);
+  letter-spacing: 0.04em;
+  font-weight: 600;
 }
 .outcome-rail {
   width: 100%;
@@ -882,14 +896,6 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 }
 #thread-prev:disabled:hover,
 #thread-next:disabled:hover { border-color: var(--line); }
-#thread-bar:not([hidden]) + .outcome-block .outcome-prompt-head {
-  flex-wrap: wrap;
-  gap: 0.28rem 0.35rem;
-}
-#thread-bar:not([hidden]) + .outcome-block #last-paste-chip:not(:empty) {
-  flex: 1 1 100%;
-  width: 100%;
-}
 .engine-hint {
   color: var(--ink);
   font-size: 0.82rem;

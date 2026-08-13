@@ -541,9 +541,20 @@ function bindOutcomeField(how, post) {
   });
 }
 
+/** Frozen clipboard string. Never formatLiveCopy or the live preview platform. */
 function lastPasteChipText(snap) {
   if (!snap || !snap.text) return '';
   return String(snap.text).replace(/\s+/g, ' ').trim();
+}
+
+function paintLastPasteChip(chip, snap, show) {
+  if (!chip) return;
+  const line = show ? lastPasteChipText(snap) : '';
+  chip.hidden = !line;
+  chip.textContent = line;
+  chip.title = line;
+  if (line && snap && snap.platformId) chip.dataset.platform = snap.platformId;
+  else delete chip.dataset.platform;
 }
 
 function paintOutcomePrompt() {
@@ -554,12 +565,7 @@ function paintOutcomePrompt() {
   const post = getActive(state);
   const show = shouldShowOutcome(post);
   box.hidden = !show;
-  const line = show ? lastPasteChipText(post.lastPaste) : '';
-  if (chip) {
-    chip.hidden = !line;
-    chip.textContent = line;
-    chip.title = line;
-  }
+  paintLastPasteChip(chip, post.lastPaste, show);
   if (!show) return;
   input.value = (post.outcome && post.outcome.note) || '';
 }
@@ -937,7 +943,9 @@ async function renderRail() {
   const money = monetizeFor(post.platform);
   const effects = effectsFor(post.platform);
   const showOutcome = shouldShowOutcome(post);
-  const chipLine = showOutcome ? lastPasteChipText(post.lastPaste) : '';
+  const pasteSnap = post.lastPaste;
+  const chipLine = showOutcome ? lastPasteChipText(pasteSnap) : '';
+  const chipPlat = chipLine && pasteSnap && pasteSnap.platformId ? pasteSnap.platformId : '';
 
   rail.innerHTML = `
     <h2>Edit</h2>
@@ -971,7 +979,7 @@ async function renderRail() {
     <div class="outcome-block" id="outcome-block">
       <div class="outcome-prompt-head">
         <label class="hint outcome-prompt-label" for="f-outcome">What happened?</label>
-        <span id="last-paste-chip" class="last-paste"${chipLine ? '' : ' hidden'}>${escapeHtml(chipLine)}</span>
+        <span id="last-paste-chip" class="last-paste"${chipLine ? '' : ' hidden'}${chipPlat ? ` data-platform="${escapeHtml(chipPlat)}"` : ''}>${escapeHtml(chipLine)}</span>
       </div>
       <div id="outcome-prompt" class="outcome-prompt"${showOutcome ? '' : ' hidden'}>
         <input id="f-outcome" type="text" class="outcome-rail" value="${escapeHtml((post.outcome && post.outcome.note) || '')}" placeholder="What you saw — optional" aria-label="What happened?">
