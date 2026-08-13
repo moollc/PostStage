@@ -69,3 +69,77 @@ export function formatPost(post, platform) {
       return formatParagraphPost(post, maxChars);
   }
 }
+
+const THREAD_MARK_RESERVE = 8;
+
+function lastBreak(slice) {
+  return Math.max(
+    slice.lastIndexOf('\n\n'),
+    slice.lastIndexOf('\n'),
+    slice.lastIndexOf(' ')
+  );
+}
+
+function splitText(text, budget) {
+  const out = [];
+  let rest = String(text || '').trim();
+  if (!rest) return [];
+  if (budget < 1) return [rest];
+  while (rest.length > budget) {
+    const slice = rest.slice(0, budget);
+    let cut = lastBreak(slice);
+    if (cut < Math.floor(budget * 0.4)) cut = budget;
+    out.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).trimStart();
+  }
+  if (rest) out.push(rest);
+  return out;
+}
+
+function withMark(chunk, i, n, maxChars) {
+  const mark = `${i}/${n}`;
+  const body = String(chunk || '').trimEnd();
+  const glued = body ? `${body} ${mark}` : mark;
+  if (glued.length <= maxChars) return glued;
+  const keep = maxChars - mark.length - 1;
+  if (keep <= 0) return mark.slice(0, maxChars);
+  return `${body.slice(0, keep).trimEnd()} ${mark}`;
+}
+
+/**
+ * Paste parts for the live post. X over 280 becomes numbered 1/n tweets,
+ * each ≤ maxChars. Every other platform is a single part (the formatPost string).
+ */
+export function formatThread(post, platform) {
+  const p = platform || getPlatform(post.platform);
+  const full = formatPost(post, p);
+  if (p.id !== 'x') return full ? [full] : [];
+  const maxChars = p.maxChars || 280;
+  if (full.length <= maxChars) return full ? [full] : [];
+
+  const core = joinSections([post.hook, post.body, post.cta]);
+  const tags = tagLine(post.hashtags);
+  const budget = Math.max(1, maxChars - THREAD_MARK_RESERVE);
+  const chunks = splitText(core, budget);
+  const n = Math.max(1, chunks.length);
+  const parts = chunks.map((c, i) => withMark(c, i + 1, n, maxChars));
+  if (tags && parts.length) {
+    const last = parts[parts.length - 1];
+    const tagged = `${last}\n\n${tags}`;
+    if (tagged.length <= maxChars) parts[parts.length - 1] = tagged;
+  }
+  return parts;
+}
+
+/**
+ * Whether copying the part at `index` should open What happened?.
+ * Thread: only the last numbered part. One-part paste: yes.
+ * Nothing to copy (partCount 0) is never a completion.
+ */
+export function isFinalThreadPart(index, partCount) {
+  const n = Number.isFinite(partCount) ? Math.floor(partCount) : 0;
+  if (n <= 0) return false;
+  const i = Number.isFinite(index) ? Math.floor(index) : 0;
+  return i >= n - 1;
+}
+

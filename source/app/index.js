@@ -1,9 +1,9 @@
 import { loadPlatforms, getPlatforms, getPlatform } from '/source/shared/platforms.js';
-import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, addIdea } from '/source/shared/store.js';
+import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, addIdea, rememberStageWrite, undoStageWrite } from '/source/shared/store.js';
 import { scorePostMaybeWasm } from '/source/shared/score.js';
 import { structureFor, interactionsFor, monetizeFor, effectsFor, PARTS } from '/source/shared/playbook.js';
 import { listAgents, sendAgent, readAgent, lastShopLine, shortCwd } from '/source/shared/agent-bridge.js';
-import { formatPost } from '/source/shared/export.js';
+import { formatThread, isFinalThreadPart } from '/source/shared/export.js';
 import { formatStageBrief } from '/source/shared/brief.js';
 
 const canvas = document.getElementById('canvas');
@@ -13,6 +13,8 @@ const plats = document.getElementById('plats');
 
 let state = loadState();
 if (state.ideaLayout !== 'stack' && state.ideaLayout !== 'free') state.ideaLayout = 'stack';
+let copiedIds = new Set();
+const threadCursor = { key: '', index: 0 };
 let selected = 'stage';
 let drag = null;
 let pan = null;
@@ -97,7 +99,29 @@ function applySelection() {
 function editingField(el) {
   if (!el) return false;
   const tag = el.tagName;
-  return tag === 'TEXTAREA' || tag === 'INPUT' || el.isContentEditable;
+  return tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT' || el.isContentEditable;
+}
+
+/** True while this field still has native keystroke undo to offer. */
+let keystrokeDirty = false;
+
+function typingField(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === 'TEXTAREA' || el.isContentEditable) return true;
+  if (tag !== 'INPUT') return false;
+  const type = (el.type || 'text').toLowerCase();
+  return type === 'text' || type === 'search' || type === '';
+}
+
+function lastWriteUndoKey(e) {
+  if (e.repeat || e.altKey || e.shiftKey || e.isComposing) return false;
+  if (!e.metaKey && !e.ctrlKey) return false;
+  return e.key === 'z' || e.key === 'Z';
+}
+
+function wantsNativeKeystrokeUndo(target) {
+  return typingField(target) && keystrokeDirty;
 }
 
 function fullText() {
@@ -106,12 +130,21 @@ function fullText() {
 }
 
 function previewText(post, platform) {
+  if (platform.id === 'x') return formatLiveCopy(post, platform);
   const parts = [post.hook, post.body, post.cta];
   if (platform.id === 'instagram' || platform.id === 'facebook' || platform.id === 'tiktok') {
     const tags = (post.hashtags || []).map((t) => '#' + t).join(' ');
     if (tags) parts.push(tags);
   }
   return parts.filter(Boolean).join('\n\n');
+}
+
+function previewCharUsed(post, platform) {
+  if (platform.id === 'x') {
+    const parts = liveThread(post, platform);
+    if (parts.length > 1) return (parts[threadCursor.index] || '').length;
+  }
+  return fullText().length;
 }
 
 function charLabel(platform, used) {
@@ -135,7 +168,7 @@ function isVideoMedia(m) {
 function mediaSlotHtml(media) {
   const m = media && media[0];
   if (!m || !m.url) {
-    return '<span class="media-placeholder">Image / video slot</span>';
+    return '<span class="media-placeholder">Click or drop an image<span class="media-session">Session only</span></span>';
   }
   if (isImageMedia(m)) {
     return `<img class="media-img" src="${m.url}" alt="${escapeHtml(m.name || 'media')}">`;
@@ -287,14 +320,21 @@ function applyIdeaToStage(idea) {
   const part = idea.part;
   if (!part) return false;
   const post = state.post;
-  if (part === 'hook') post.hook = text;
-  else if (part === 'body') post.body = text;
-  else if (part === 'cta') post.cta = text;
-  else if (part === 'tags') {
+  if (part === 'hook' || part === 'body' || part === 'cta') {
+    if (String(post[part] || '') === text) return true;
+    rememberStageWrite(state);
+    post[part] = text;
+    return true;
+  }
+  if (part === 'tags') {
     post.hashtags = text.split(/\s+/).filter(Boolean).map((t) => t.replace(/^#/, ''));
-  } else if (part === 'media') post.genPrompt = text;
-  else return false;
-  return true;
+    return true;
+  }
+  if (part === 'media') {
+    post.genPrompt = text;
+    return true;
+  }
+  return false;
 }
 
 function ideaCard(idea) {
@@ -399,10 +439,110 @@ function ideaCard(idea) {
   return el;
 }
 
+function liveThread(post, platform) {
+  const parts = formatThread(post, platform);
+  const key = `${post.id}:${platform.id}:${parts.join('\0')}`;
+  if (key !== threadCursor.key) {
+    threadCursor.key = key;
+    threadCursor.index = 0;
+  }
+  if (!parts.length) threadCursor.index = 0;
+  else if (threadCursor.index >= parts.length) threadCursor.index = parts.length - 1;
+  return parts;
+}
+
+function threadChromeLabel() {
+  const post = getActive(state);
+  const platform = getPlatform(post.platform);
+  const parts = liveThread(post, platform);
+  if (parts.length < 2) return null;
+  return `${threadCursor.index + 1}/${parts.length}`;
+}
+
+function paintThreadChrome() {
+  const label = threadChromeLabel();
+  for (const id of ['thread-part-chrome-top', 'thread-part-chrome-stage', 'thread-part-chrome-dock']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (!label) {
+      el.hidden = true;
+      el.textContent = '';
+    } else {
+      el.hidden = false;
+      el.textContent = label;
+    }
+  }
+}
+
+function advanceThreadPart() {
+  const post = getActive(state);
+  const platform = getPlatform(post.platform);
+  const parts = liveThread(post, platform);
+  if (parts.length < 2) return;
+  threadCursor.index = (threadCursor.index + 1) % parts.length;
+  paintPasteView();
+}
+
+function prevThreadPart() {
+  const post = getActive(state);
+  const platform = getPlatform(post.platform);
+  const parts = liveThread(post, platform);
+  if (parts.length < 2 || threadCursor.index <= 0) return;
+  threadCursor.index -= 1;
+  paintPasteView();
+}
+
+function formatLiveCopy(post, platform) {
+  const parts = liveThread(post, platform);
+  return parts[threadCursor.index] || '';
+}
+
+function paintStagePreview() {
+  const card = canvas.querySelector('.stage-card');
+  if (!card) return;
+  const post = getActive(state);
+  const platform = getPlatform(post.platform);
+  const prev = card.querySelector('.preview');
+  if (prev) fillPreviewText(prev, platform, previewText(post, platform));
+  const ch = card.querySelector('.chars');
+  if (ch) {
+    const used = previewCharUsed(post, platform);
+    ch.textContent = charLabel(platform, used);
+    ch.classList.toggle('over', used > platform.maxChars);
+  }
+}
+
+function shouldShowOutcome(post) {
+  return copiedIds.has(post.id) || Boolean(post.outcome) || post.status === 'published';
+}
+
+function bindOutcomeField(how, post) {
+  how.type = 'text';
+  how.className = 'outcome-rail';
+  how.placeholder = 'What you saw — optional';
+  how.setAttribute('aria-label', 'What happened?');
+  how.value = (post.outcome && post.outcome.note) || '';
+  how.addEventListener('change', () => {
+    setOutcome(state, post.id, how.value);
+    persist();
+  });
+}
+
+function paintOutcomePrompt() {
+  const box = document.getElementById('outcome-prompt');
+  const input = document.getElementById('f-outcome');
+  if (!box || !input) return;
+  const post = getActive(state);
+  const show = shouldShowOutcome(post);
+  box.hidden = !show;
+  if (!show) return;
+  input.value = (post.outcome && post.outcome.note) || '';
+}
+
 function stageCard() {
   const post = state.post;
   const platform = getPlatform(post.platform);
-  const used = fullText().length;
+  const used = previewCharUsed(post, platform);
   const el = document.createElement('article');
   el.className = 'card stage-card' + (selected === 'stage' ? ' selected' : '');
   el.style.left = post.x + 'px';
@@ -424,24 +564,11 @@ function stageCard() {
   bindStatusToggle(status, post);
   el.appendChild(status);
 
-  if (post.status === 'published') {
-    const how = document.createElement('input');
-    how.type = 'text';
-    how.className = 'outcome';
-    how.placeholder = 'How it did';
-    how.setAttribute('aria-label', 'How it did');
-    how.value = (post.outcome && post.outcome.note) || '';
-    how.addEventListener('change', () => {
-      setOutcome(state, post.id, how.value);
-      persist();
-    });
-    el.appendChild(how);
-  }
-
   const prev = document.createElement('div');
   prev.className = 'preview platform-' + platform.id + ' ' + platform.shape;
   prev.innerHTML = buildPreview(post, platform);
   fillPreviewText(prev, platform, previewText(post, platform));
+  bindStageMediaSlot(prev);
   el.appendChild(prev);
 
   const chars = document.createElement('div');
@@ -449,9 +576,143 @@ function stageCard() {
   chars.textContent = charLabel(platform, used);
   el.appendChild(chars);
 
+  const actions = document.createElement('div');
+  actions.className = 'stage-actions copy-with-chrome';
+  const threadChrome = document.createElement('span');
+  threadChrome.id = 'thread-part-chrome-stage';
+  threadChrome.className = 'thread-part-chrome';
+  threadChrome.hidden = true;
+  const copyLive = document.createElement('button');
+  copyLive.type = 'button';
+  copyLive.className = 'stage-copy primary';
+  copyLive.textContent = 'Copy';
+  copyLive.setAttribute('aria-label', 'Copy live post for paste');
+  copyLive.addEventListener('click', (e) => e.stopPropagation());
+  actions.append(threadChrome, copyLive);
+  el.appendChild(actions);
+  bindLiveCopy(copyLive);
+
   bindDrag(el, post);
   el.addEventListener('mousedown', () => { selectCard('stage'); });
   return el;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('read_failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function quotaError(err) {
+  return Boolean(err && (err.name === 'QuotaExceededError' || err.code === 22));
+}
+
+async function attachLocalFile(file, imageOnly) {
+  if (!file) return false;
+  if (imageOnly && !file.type.startsWith('image/')) return false;
+  if (!imageOnly && !file.type.startsWith('image/') && !file.type.startsWith('video/')) return false;
+  const post = getActive(state);
+  const prev = post.media && post.media[0];
+  if (prev && prev.url && String(prev.url).startsWith('blob:')) URL.revokeObjectURL(prev.url);
+
+  const keep = { name: file.name, type: file.type, url: '', session: false };
+  const smallImage = file.type.startsWith('image/') && file.size <= 900000;
+  if (smallImage) {
+    try {
+      keep.url = await readFileAsDataUrl(file);
+    } catch {
+      keep.url = URL.createObjectURL(file);
+      keep.session = true;
+    }
+  } else {
+    keep.url = URL.createObjectURL(file);
+    keep.session = true;
+  }
+  post.media = [keep];
+  try {
+    persist();
+  } catch (err) {
+    if (!quotaError(err) || !String(keep.url).startsWith('data:')) throw err;
+    keep.url = URL.createObjectURL(file);
+    keep.session = true;
+    post.media = [keep];
+    persist();
+  }
+  render();
+  return true;
+}
+
+function clearLocalMedia() {
+  const post = getActive(state);
+  const prev = post.media && post.media[0];
+  if (prev && prev.url && String(prev.url).startsWith('blob:')) URL.revokeObjectURL(prev.url);
+  post.media = [];
+  persist();
+  render();
+}
+
+function bindStageMediaSlot(preview) {
+  const slot = preview.querySelector('.media-slot');
+  if (!slot) return;
+  slot.classList.add('droppable');
+  slot.setAttribute('role', 'button');
+  slot.tabIndex = 0;
+  slot.setAttribute('aria-label', 'Add a local image — this session only');
+  slot.title = 'Click or drop a local image (this session only)';
+
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.hidden = true;
+  slot.appendChild(input);
+
+  if (slot.querySelector('.media-img, .media-vid')) {
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'media-remove';
+    del.textContent = 'Remove';
+    del.setAttribute('aria-label', 'Remove media');
+    del.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      clearLocalMedia();
+    });
+    slot.appendChild(del);
+  }
+
+  const pick = () => input.click();
+  slot.addEventListener('click', (e) => {
+    e.stopPropagation();
+    pick();
+  });
+  slot.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    pick();
+  });
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('change', () => {
+    attachLocalFile(input.files && input.files[0], true);
+  });
+
+  for (const type of ['dragenter', 'dragover']) {
+    slot.addEventListener(type, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      slot.classList.add('drag-over');
+    });
+  }
+  slot.addEventListener('dragleave', () => slot.classList.remove('drag-over'));
+  slot.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    slot.classList.remove('drag-over');
+    const file = [...(e.dataTransfer.files || [])].find((f) => f.type.startsWith('image/'));
+    attachLocalFile(file, true);
+  });
 }
 
 function bindDrag(el, obj) {
@@ -598,6 +859,48 @@ function bindStatusToggle(btn, post) {
   });
 }
 
+function formatLastCutPreview(stageUndo) {
+  if (!stageUndo) return '';
+  const parts = [stageUndo.hook, stageUndo.body, stageUndo.cta]
+    .map((s) => String(s || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  return parts.join(' · ') || '(empty)';
+}
+
+function restoreLastWrite() {
+  if (!undoStageWrite(state)) return;
+  persist();
+  render();
+}
+
+function paintUndoButton() {
+  const btn = document.getElementById('agent-undo');
+  const cut = document.getElementById('stage-cut');
+  const snap = getActive(state).stageUndo;
+  const can = Boolean(snap);
+  if (btn) {
+    btn.disabled = !can;
+    btn.textContent = can ? 'Undo last write' : 'Undo';
+  }
+  if (cut) {
+    const line = formatLastCutPreview(snap);
+    cut.hidden = !can;
+    cut.textContent = line;
+    cut.title = line;
+    cut.disabled = !can;
+  }
+  const kbdHint = document.getElementById('undo-kbd-hint');
+  if (kbdHint) kbdHint.hidden = false;
+}
+
+function bindStageUndo() {
+  const btn = document.getElementById('agent-undo');
+  const cut = document.getElementById('stage-cut');
+  if (btn) btn.addEventListener('click', restoreLastWrite);
+  if (cut) cut.addEventListener('click', restoreLastWrite);
+  paintUndoButton();
+}
+
 async function renderRail() {
   const post = state.post;
   const platform = getPlatform(post.platform);
@@ -628,8 +931,17 @@ async function renderRail() {
     </select>
 
     <h2>Paste</h2>
-    <p class="hint">Exact string for ${escapeHtml(platform.label)} — same as Copy post</p>
+    <p class="hint" id="paste-hint">Exact string for ${escapeHtml(platform.label)} — same as Copy post</p>
     <pre id="paste-view" class="paste-view" tabindex="0"></pre>
+    <div class="thread-bar" id="thread-bar" hidden>
+      <span id="thread-pos"></span>
+      <button type="button" id="thread-prev">Prev part</button>
+      <button type="button" id="thread-next">Next part</button>
+    </div>
+    <div id="outcome-prompt" class="outcome-prompt"${shouldShowOutcome(post) ? '' : ' hidden'}>
+      <label class="hint outcome-prompt-label" for="f-outcome">What happened?</label>
+      <input id="f-outcome" type="text" class="outcome-rail" value="${escapeHtml((post.outcome && post.outcome.note) || '')}" placeholder="What you saw — optional" aria-label="What happened?">
+    </div>
 
     <h2>Structure · what each part does</h2>
     <p class="hint">Best form on ${platform.label}: ${platform.bestForm}</p>
@@ -657,15 +969,24 @@ async function renderRail() {
       <button type="button" id="agent-send">Send to first idle</button>
       <button type="button" id="agent-ask">Ask shop</button>
       <button type="button" id="agent-keep">Keep shop line</button>
+      <div class="copy-with-chrome agent-copy-wrap">
+        <span id="thread-part-chrome-dock" class="thread-part-chrome" hidden></span>
+        <button type="button" id="agent-copy">Copy</button>
+      </div>
+      <div class="agent-undo-wrap">
+        <button type="button" id="agent-undo" disabled>Undo</button>
+        <span id="undo-kbd-hint" class="lane-kbd-hint undo-kbd-hint" hidden><kbd>⌘Z</kbd> / <kbd>Ctrl+Z</kbd></span>
+      </div>
+      <button type="button" id="stage-cut" class="stage-cut" hidden aria-label="Restore displaced copy"></button>
     </div>
   `;
 
   const partsEl = rail.querySelector('#parts');
   paintStructure(partsEl);
 
-  bindField('f-hook', (v) => { post.hook = v; });
-  bindField('f-body', (v) => { post.body = v; });
-  bindField('f-cta', (v) => { post.cta = v; });
+  bindStagePart('f-hook', 'hook');
+  bindStagePart('f-body', 'body');
+  bindStagePart('f-cta', 'cta');
   bindField('f-tags', (v) => { post.hashtags = v.split(/\s+/).filter(Boolean).map((t) => t.replace(/^#/, '')); });
   bindField('f-gen', (v) => { post.genPrompt = v; });
   bindField('f-audience', (v) => { post.audience = v; });
@@ -674,36 +995,72 @@ async function renderRail() {
     persist();
     scheduleJudgement();
   });
+  const outcomeInput = rail.querySelector('#f-outcome');
+  if (outcomeInput) bindOutcomeField(outcomeInput, post);
+  paintOutcomePrompt();
   paintJudgement(scored);
 
   rail.querySelector('#f-file').addEventListener('change', (e) => {
     const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    const url = URL.createObjectURL(file);
-    post.media = [{ name: file.name, type: file.type, url }];
-    persist();
-    render();
+    attachLocalFile(file, false);
   });
 
   loadAgentDock();
+  bindStageUndo();
+  const nextPart = rail.querySelector('#thread-next');
+  const prevPart = rail.querySelector('#thread-prev');
+  if (prevPart) prevPart.addEventListener('click', prevThreadPart);
+  if (nextPart) nextPart.addEventListener('click', advanceThreadPart);
+  paintThreadChrome();
+}
+
+function afterFieldInput() {
+  persist();
+  paintUndoButton();
+  paintPasteView();
+  scheduleJudgement();
+  paintCanvasHint();
 }
 
 function bindField(id, apply) {
   const el = document.getElementById(id);
   el.addEventListener('input', () => {
     apply(el.value);
-    persist();
-    const card = canvas.querySelector('.stage-card');
-    if (card) {
-      const platform = getPlatform(state.post.platform);
-      const text = previewText(state.post, platform);
-      fillPreviewText(card.querySelector('.preview'), platform, text);
-      const used = fullText().length;
-      const ch = card.querySelector('.chars');
-      ch.textContent = charLabel(platform, used);
-      ch.classList.toggle('over', used > platform.maxChars);
+    afterFieldInput();
+  });
+}
+
+function snapshotStageParts(post) {
+  return {
+    hook: String(post.hook || ''),
+    body: String(post.body || ''),
+    cta: String(post.cta || '')
+  };
+}
+
+function stagePartsChanged(a, b) {
+  return a.hook !== b.hook || a.body !== b.body || a.cta !== b.cta;
+}
+
+function bindStagePart(id, field) {
+  const el = document.getElementById(id);
+  let before = null;
+  el.addEventListener('focus', () => {
+    before = snapshotStageParts(getActive(state));
+  });
+  el.addEventListener('input', () => {
+    getActive(state)[field] = el.value;
+    afterFieldInput();
+  });
+  el.addEventListener('blur', () => {
+    if (!before) return;
+    const post = getActive(state);
+    if (stagePartsChanged(before, snapshotStageParts(post))) {
+      rememberStageWrite(state, before);
+      persist();
+      paintUndoButton();
     }
-    scheduleJudgement();
+    before = null;
   });
 }
 
@@ -766,10 +1123,75 @@ function paintJudgement(scored) {
 }
 
 function paintPasteView() {
+  const post = getActive(state);
+  const platform = getPlatform(post.platform);
+  const parts = liveThread(post, platform);
+  const i = threadCursor.index;
+  const n = parts.length;
+  const text = parts[i] || '';
   const el = rail.querySelector('#paste-view');
-  if (!el) return;
-  const platform = getPlatform(state.post.platform);
-  el.textContent = formatPost(state.post, platform);
+  if (el) el.textContent = text;
+  const hint = rail.querySelector('#paste-hint');
+  const bar = rail.querySelector('#thread-bar');
+  const pos = rail.querySelector('#thread-pos');
+  const next = rail.querySelector('#thread-next');
+  const prev = rail.querySelector('#thread-prev');
+  const threaded = platform.id === 'x' && n > 1;
+  if (hint) {
+    hint.textContent = threaded
+      ? `Exact string for ${platform.label} — ${i + 1}/${n} · Copy sends this part`
+      : `Exact string for ${platform.label} — same as Copy post`;
+  }
+  if (bar) bar.hidden = !threaded;
+  if (pos) pos.textContent = threaded ? `${i + 1}/${n}` : '';
+  if (prev) prev.disabled = !threaded || i <= 0;
+  if (next) next.disabled = !threaded;
+  if (bar) {
+    if (threaded) bar.dataset.final = isFinalThreadPart(i, n) ? '1' : '0';
+    else delete bar.dataset.final;
+  }
+  paintStagePreview();
+  paintThreadChrome();
+}
+
+/** One-click clipboard of the live paste string (current thread part on X). */
+function bindLiveCopy(btn) {
+  if (!btn || btn.dataset.copyBound) return;
+  btn.dataset.copyBound = '1';
+  const idle = btn.textContent || 'Copy post';
+  btn.addEventListener('click', async () => {
+    const flash = (label, kind) => {
+      btn.textContent = label;
+      btn.classList.remove('copied', 'failed', 'warn');
+      if (kind) btn.classList.add(kind);
+      clearTimeout(btn._copyT);
+      btn._copyT = setTimeout(() => {
+        btn.textContent = idle;
+        btn.classList.remove('copied', 'failed', 'warn');
+      }, 2000);
+    };
+    try {
+      const platform = getPlatform(state.post.platform);
+      const text = formatLiveCopy(state.post, platform).trim();
+      if (!text || text === 'Untitled post') {
+        flash('Nothing to copy');
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      const parts = liveThread(state.post, platform);
+      if (isFinalThreadPart(threadCursor.index, parts.length)) {
+        copiedIds.add(getActive(state).id);
+        paintOutcomePrompt();
+      }
+      const partLabel = threadChromeLabel();
+      if (partLabel) flash(`Copied · ${partLabel}`, 'copied');
+      else if (text.length > (platform.maxChars || 0)) flash('Copied · over limit', 'warn');
+      else if (!String(state.post.audience || '').trim()) flash('Copied · no who named', 'copied');
+      else flash('Copied · ' + platform.label, 'copied');
+    } catch {
+      flash('Copy failed', 'failed');
+    }
+  });
 }
 
 async function loadAgentDock() {
@@ -777,6 +1199,10 @@ async function loadAgentDock() {
   const sendBtn = document.getElementById('agent-send');
   const askBtn = document.getElementById('agent-ask');
   const keepBtn = document.getElementById('agent-keep');
+  const copyDock = document.getElementById('agent-copy');
+  bindLiveCopy(copyDock);
+  paintUndoButton();
+  paintThreadChrome();
   if (!box) return;
 
   const disable = (why) => {
@@ -929,8 +1355,16 @@ function applyIdeaLayoutClass() {
 function paintIdeaLaneHead(lane) {
   const head = document.createElement('div');
   head.className = 'idea-lane-head';
+  const title = document.createElement('div');
+  title.className = 'idea-lane-title';
   const h2 = document.createElement('h2');
   h2.textContent = 'Ideas';
+  const kbdHint = document.createElement('span');
+  kbdHint.className = 'lane-kbd-hint';
+  const kbd = document.createElement('kbd');
+  kbd.textContent = 'i';
+  kbdHint.append(kbd, ' adds');
+  title.append(h2, kbdHint);
   const toggle = document.createElement('div');
   toggle.className = 'idea-layout-toggle';
   toggle.setAttribute('role', 'group');
@@ -946,7 +1380,7 @@ function paintIdeaLaneHead(lane) {
     });
     toggle.appendChild(b);
   }
-  head.append(h2, toggle);
+  head.append(title, toggle);
   lane.appendChild(head);
 }
 
@@ -1026,6 +1460,57 @@ function paintBoard() {
   board.appendChild(add);
 }
 
+function hintAction(label, onClick) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = label;
+  b.addEventListener('pointerdown', (e) => e.stopPropagation());
+  b.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onClick();
+  });
+  return b;
+}
+
+function addBlankIdea() {
+  const idea = { id: uid(), text: '', part: '' };
+  if (ideaLayout() === 'free') {
+    const pos = nextFreeIdeaPos();
+    idea.x = pos.x;
+    idea.y = pos.y;
+  }
+  state.ideas.push(idea);
+  persist();
+  selectCard(idea.id);
+  render();
+  const card = document.querySelector(`.card.idea[data-id="${idea.id}"]`);
+  const ta = card && card.querySelector('textarea');
+  if (ta) ta.focus();
+}
+
+function focusAskShop() {
+  const ask = document.getElementById('agent-ask');
+  if (!ask) return;
+  ask.scrollIntoView({ block: 'nearest' });
+  ask.focus();
+}
+
+function paintCanvasHint() {
+  const post = getActive(state);
+  const show = !(post.ideas && post.ideas.length) && !String(post.hook || '').trim();
+  let el = canvas.querySelector('.canvas-hint');
+  if (!show) {
+    if (el) el.remove();
+    return;
+  }
+  if (el) return;
+  el = document.createElement('p');
+  el.className = 'canvas-hint empty-board-hint';
+  el.append(hintAction('Add an idea', addBlankIdea), ' or ', hintAction('Ask shop', focusAskShop));
+  canvas.appendChild(el);
+}
+
 function render() {
   canvas.innerHTML = '';
   const lane = ensureIdeaLane();
@@ -1041,48 +1526,18 @@ function render() {
     else lane.appendChild(card);
   }
   canvas.appendChild(stageCard());
+  paintCanvasHint();
   paintBoard();
   // Cards were just rebuilt from scratch. Re-assert the selection from the id
   // so a platform switch or idea edit cannot silently drop it.
   applySelection();
   renderRail();
+  paintThreadChrome();
 }
 
-document.getElementById('btn-idea').addEventListener('click', () => {
-  const idea = { id: uid(), text: '', part: '' };
-  if (ideaLayout() === 'free') {
-    const pos = nextFreeIdeaPos();
-    idea.x = pos.x;
-    idea.y = pos.y;
-  }
-  state.ideas.push(idea);
-  persist();
-  render();
-});
+document.getElementById('btn-idea').addEventListener('click', () => addBlankIdea());
 
-let copyTimer = 0;
-const copyBtn = document.getElementById('btn-export');
-copyBtn.addEventListener('click', async () => {
-  clearTimeout(copyTimer);
-  const flash = (label, kind) => {
-    copyBtn.textContent = label;
-    copyBtn.classList.remove('copied', 'failed');
-    copyBtn.classList.add(kind);
-    copyTimer = setTimeout(() => {
-      copyBtn.textContent = 'Copy post';
-      copyBtn.classList.remove('copied', 'failed');
-    }, 2000);
-  };
-  try {
-    const platform = getPlatform(state.post.platform);
-    await navigator.clipboard.writeText(formatPost(state.post, platform));
-    const who = String(state.post.audience || '').trim();
-    if (!who) flash('Copied · no who named', 'copied');
-    else flash('Copied · ' + getPlatform(state.post.platform).label, 'copied');
-  } catch {
-    flash('Copy failed', 'failed');
-  }
-});
+bindLiveCopy(document.getElementById('btn-export'));
 
 await loadPlatforms();
 applyView();
@@ -1131,12 +1586,33 @@ function setPanCursor() {
   wrap.classList.toggle('is-panning', !!pan);
 }
 
+document.addEventListener('focusin', (e) => {
+  if (typingField(e.target)) keystrokeDirty = false;
+});
+document.addEventListener('input', (e) => {
+  if (typingField(e.target)) keystrokeDirty = true;
+}, true);
+
 window.addEventListener('keydown', (e) => {
-  if (e.code !== 'Space' || e.repeat) return;
+  if (lastWriteUndoKey(e)) {
+    if (wantsNativeKeystrokeUndo(e.target)) return;
+    if (!getActive(state).stageUndo) return;
+    e.preventDefault();
+    restoreLastWrite();
+    return;
+  }
   if (editingField(e.target)) return;
+  if (e.code === 'Space') {
+    if (e.repeat) return;
+    e.preventDefault();
+    spaceDown = true;
+    setPanCursor();
+    return;
+  }
+  if (e.key !== 'i' && e.key !== 'I') return;
+  if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
   e.preventDefault();
-  spaceDown = true;
-  setPanCursor();
+  addBlankIdea();
 });
 window.addEventListener('blur', () => {
   spaceDown = false;
