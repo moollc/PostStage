@@ -546,6 +546,7 @@ function bindOutcomeField(how, post) {
   how.addEventListener('change', () => {
     setOutcome(state, post.id, how.value);
     persist();
+    paintBoard();
   });
 }
 
@@ -1482,6 +1483,10 @@ function hasLastPaste(post) {
   return Boolean(post && post.lastPaste && String(post.lastPaste.text || '').trim());
 }
 
+function hasOutcomeNote(post) {
+  return Boolean(post && post.outcome && String(post.outcome.note || '').trim());
+}
+
 function paintBoard() {
   const board = ensureBoard();
   board.innerHTML = '';
@@ -1495,7 +1500,9 @@ function paintBoard() {
     row.className = 'board-row' + (post.id === state.activeId ? ' active' : '');
     row.dataset.id = post.id;
     const copied = hasLastPaste(post);
+    const noted = hasOutcomeNote(post);
     if (copied) row.dataset.copied = '1';
+    if (noted) row.dataset.noted = '1';
     const pick = document.createElement('button');
     pick.type = 'button';
     pick.className = 'board-pick';
@@ -1513,6 +1520,13 @@ function paintBoard() {
       mark.className = 'board-copied';
       mark.textContent = 'copied';
       mark.title = String(post.lastPaste.text).replace(/\s+/g, ' ').trim();
+      row.appendChild(mark);
+    }
+    if (noted) {
+      const mark = document.createElement('span');
+      mark.className = 'board-noted';
+      mark.textContent = 'noted';
+      mark.title = String(post.outcome.note).replace(/\s+/g, ' ').trim();
       row.appendChild(mark);
     }
     if (post.source === 'banter') {
