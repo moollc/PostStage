@@ -76,11 +76,15 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 .board-status { font-size: 0.68rem; padding: 0.18rem 0.4rem; }
 .board-status.published { border-color: var(--ok); color: var(--ok); }
 .board-src,
-.card.idea .idea-src {
+.card.idea .idea-src,
+.card.idea .idea-part-hint {
   font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--amber); flex: none;
 }
 .board-src { padding: 0 0.2rem 0 0; }
+.card.idea .idea-part-hint { text-transform: lowercase; opacity: 0.92; }
+.card.idea.needs-part .idea-part { border-color: var(--amber); color: var(--amber); }
+.card.idea.needs-part:not(.empty) { box-shadow: 0 0 0 1px #e8a54b33; }
 .board-new { flex: none; font-size: 0.75rem; }
 .stage-status { margin: 0.2rem 0 0.35rem; font-size: 0.72rem; }
 .card.stage-card .outcome {
