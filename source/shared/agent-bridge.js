@@ -84,8 +84,9 @@ const SHOP_UNSAFE = [
   /file:\/\//i,
   // An address is someone's identity even when it is the operator's own.
   /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/,
-  // Keys, tokens and secrets — named, or shaped like the common prefixes.
-  /\b(api[_-]?key|secret|token|password|passwd|bearer|authorization)\b/i,
+  // Assignment-shaped secrets (`secret=` `password:` `API_KEY=…`). A bare
+  // English word (`secret sauce`, `password prompt`) must Keep.
+  /\b(api[_-]?key|secret|token|password|passwd|bearer|authorization)\s*[=:]\s*\S/i,
   // Vendor key prefixes. The tail may itself contain `-`/`_` separators
   // (`sk-live-abc…`, `xoxb-123-abc…`), so match the whole run, not one segment.
   /\b(sk|pk|ghp|gho|ghu|ghs|xox[abps])[-_][A-Za-z0-9][A-Za-z0-9_-]{7,}/
