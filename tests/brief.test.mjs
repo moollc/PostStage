@@ -153,6 +153,63 @@ t('formatStageBrief scrubs a multi-word path inside the hook', () => {
   ok(!brief.includes('alex'), 'no fragment of the path survives anywhere in the brief');
 });
 
+t('formatStageBrief omits copied paste when lastPaste is missing', () => {
+  const brief = formatStageBrief(
+    { audience: 'creators', audienceHow: 'stated', platform: 'x', hook: 'live hook' },
+    { id: 'x', label: 'X' },
+    { band: 'ready', checks: [] },
+    []
+  );
+  ok(!brief.includes('Copied paste'), 'no Copied paste line');
+  ok(!brief.includes('Copied platform'), 'no Copied platform line');
+  ok(!brief.includes('Copied part'), 'no Copied part line');
+});
+
+t('formatStageBrief includes frozen lastPaste, not the live rail', () => {
+  const pasted = 'exact X paste 2/2';
+  const brief = formatStageBrief(
+    {
+      audience: 'creators',
+      audienceHow: 'stated',
+      platform: 'linkedin',
+      hook: 'live hook after a later edit',
+      body: 'live body',
+      lastPaste: { text: pasted, platformId: 'x', partIndex: 1 }
+    },
+    { id: 'linkedin', label: 'LinkedIn' },
+    { band: 'ready', checks: [] },
+    []
+  );
+  ok(brief.includes(`Copied paste: ${pasted}`), 'frozen clipboard string');
+  ok(brief.includes('Copied platform: x'), 'copied platformId');
+  ok(brief.includes('Copied part: 1'), 'copied partIndex');
+  ok(brief.includes('Hook: live hook after a later edit'), 'live rail still present');
+  ok(brief.includes('Platform: LinkedIn'), 'live preview platform still present');
+  ok(!/reach|impress|likes|views|followers/i.test(brief), 'no invented metrics');
+});
+
+t('formatStageBrief scrubs a path inside lastPaste text', () => {
+  const brief = formatStageBrief(
+    {
+      audience: 'creators',
+      audienceHow: 'stated',
+      platform: 'x',
+      hook: 'clean hook',
+      lastPaste: {
+        text: 'copied /Users/alex/My Drive/A Folder With Spaces/file.js onto X',
+        platformId: 'x',
+        partIndex: 0
+      }
+    },
+    { id: 'x', label: 'X' },
+    { band: 'ready', checks: [] },
+    []
+  );
+  ok(brief.includes('Copied paste: copied <path> onto X'), 'lastPaste text is scrubbed');
+  ok(!brief.includes('Folder'), 'no folder fragment in lastPaste');
+  ok(!brief.includes('alex'), 'no home fragment in lastPaste');
+});
+
 function ok(v, msg) {
   if (!v) throw new Error(msg || 'expected truthy');
 }

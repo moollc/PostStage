@@ -121,10 +121,30 @@ export function formatStageBrief(post, platform, scored, parts) {
     field('Call', post?.cta),
     `Tags: ${tagText(post?.hashtags)}`,
     field('Gen prompt', post?.genPrompt),
+    ...copiedPasteLines(post),
     unclaimed.length
       ? `Unclaimed parts: ${unclaimed.join(', ')}`
       : 'Unclaimed parts: none',
     heuristic,
     'Which part is not doing its job? One line.'
   ].join('\n');
+}
+
+/**
+ * Frozen clipboard snapshot for Ask shop. Omitted when there is no lastPaste.
+ * Text, platformId, and partIndex only — no reach, likes, or timestamps.
+ */
+function copiedPasteLines(post) {
+  const snap = post?.lastPaste;
+  if (!snap || !String(snap.text ?? '').trim()) return [];
+  const platformId = typeof snap.platformId === 'string' ? snap.platformId : '';
+  const rawIndex = snap.partIndex;
+  const partIndex = Number.isFinite(Number(rawIndex))
+    ? Math.max(0, Math.floor(Number(rawIndex)))
+    : 0;
+  return [
+    field('Copied paste', snap.text),
+    `Copied platform: ${scrubPaths(platformId).trim() || '(empty)'}`,
+    `Copied part: ${partIndex}`
+  ];
 }
