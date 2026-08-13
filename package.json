@@ -22,6 +22,7 @@
     "test:browser-platform": "node tests/browser-platform-paste.mjs",
     "test:browser-board": "node tests/browser-board-copied.mjs",
     "test:browser-noted": "node tests/browser-board-noted.mjs",
+    "test:browser-copyout": "node tests/browser-copy-out.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
   },
   "dependencies": {},
