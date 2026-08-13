@@ -1,0 +1,20 @@
+{
+  "name": "PostStage",
+  "short_name": "PostStage",
+  "description": "Local canvas to ideate, preview and judge social posts",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0e1014",
+  "theme_color": "#0e1014",
+  "icons": [
+    {
+      "src": "source/assets/images/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["productivity", "social"]
+}
