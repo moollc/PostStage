@@ -8,6 +8,7 @@ import { formatStageBrief } from '/source/shared/brief.js';
 import { isSafeRelPath, mediaSrcForPath } from '/source/shared/media-link.js';
 import { formatLedger } from '/source/shared/ledger.js';
 import { compressStill, IMAGE_PERSIST_BUDGET } from '/source/shared/compress-still.js';
+import { inboxIdFromItem } from '/source/shared/inbox-id.js';
 
 const canvas = document.getElementById('canvas');
 const wrap = canvas.parentElement;
@@ -206,7 +207,7 @@ function isUsableBlob(m) {
 const MEDIA_LINKED_CLIP = 'Linked clip';
 const MEDIA_SESSION_ONLY = 'Session only';
 const LEAVES_ON_REFRESH = 'This picture leaves when you refresh';
-const SESSION_ONLY_CLIP = 'Session-only clip';
+const SESSION_ONLY_CLIP = 'Session only — leaves on refresh';
 
 function mediaSessionOverlayText(m) {
   if (isVideoMedia(m)) return SESSION_ONLY_CLIP;
@@ -215,7 +216,7 @@ function mediaSessionOverlayText(m) {
 
 function mediaLeavesNote(m) {
   if (!m || !m.url || mediaPersists(m)) return '';
-  return `<span class="media-session media-leaves">${escapeHtml(mediaSessionOverlayText(m))}</span>`;
+  return `<span class="media-session media-leaves media-unwatched">${escapeHtml(mediaSessionOverlayText(m))}</span>`;
 }
 
 function mediaLinkedNote(m) {
@@ -1985,7 +1986,7 @@ async function pullInbox() {
     let added = false;
     const stay = state.activeId;
     for (const item of incoming) {
-      const id = String(item.id || '').trim();
+      const id = inboxIdFromItem(item);
       if (!id || have.has(id)) continue;
       addPost(state, {
         id,

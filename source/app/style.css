@@ -617,7 +617,6 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
   letter-spacing: 0.02em;
   margin-top: 0.22rem;
 }
-.preview .media-slot .media-leaves,
 .preview .media-slot .media-linked {
   position: absolute;
   left: 0;
@@ -632,6 +631,35 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
   color: var(--amber);
   background: #0e1014e8;
   letter-spacing: 0.02em;
+}
+/* Session blob — unwatched: full-slot overlay, not a bottom caption */
+.preview .media-slot .media-leaves.media-unwatched {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  color: var(--amber);
+  background: #0e1014eb;
+  border: 1px solid #e8a54b55;
+  box-shadow: inset 0 0 28px #0000008c;
+  letter-spacing: 0.02em;
+}
+.preview .media-slot:has(.media-leaves.media-unwatched) .media-vid,
+.preview .media-slot:has(.media-leaves.media-unwatched) .media-img {
+  filter: brightness(0.32) saturate(0.6);
+}
+.preview .media-slot:has(.media-leaves.media-unwatched) .media-vid {
+  pointer-events: none;
 }
 .preview .media-slot .media-remove {
   position: absolute;
