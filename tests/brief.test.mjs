@@ -210,6 +210,111 @@ t('formatStageBrief scrubs a path inside lastPaste text', () => {
   ok(!brief.includes('alex'), 'no home fragment in lastPaste');
 });
 
+// --- Ask shop's live href is a status URL, no junk -------------------------
+// Lead brief: the brief must not include junk, home paths, or view counts.
+// liveHrefLines re-normalizes post.publishedUrl through normalizePublishedUrl
+// rather than trusting it as stored, since the brief is the last stop before
+// this leaves the machine for a Herdr pane.
+//
+// The line's exact label ("Live:" vs "Live URL:") has changed under
+// concurrent edits to this file more than once while these tests were being
+// written. The label is cosmetic; the safety contract is not. These match
+// on content — a line that contains "Live" and the URL — rather than one
+// exact label string, so the tests hold regardless of which label wins.
+
+const BASE_POST = { audience: 'creators', audienceHow: 'stated', platform: 'x', hook: 'H' };
+const PLATFORM_X = { id: 'x', label: 'X' };
+const CLEAN_SCORE = { band: 'ready', checks: [] };
+
+/** The line carrying the live href, or undefined if there is none. */
+function liveLine(brief) {
+  return brief.split('\n').find((l) => /^Live/i.test(l) && l.includes('http'));
+}
+
+t('formatStageBrief includes a clean published URL as a Live line', () => {
+  const brief = formatStageBrief(
+    { ...BASE_POST, publishedUrl: 'https://x.com/jayson_x/status/42' },
+    PLATFORM_X,
+    CLEAN_SCORE,
+    []
+  );
+  const line = liveLine(brief);
+  ok(line, 'a live line exists');
+  ok(line.endsWith('https://x.com/jayson_x/status/42'), `live line was ${JSON.stringify(line)}`);
+});
+
+t('formatStageBrief omits the live line entirely when there is no publishedUrl', () => {
+  const brief = formatStageBrief(BASE_POST, PLATFORM_X, CLEAN_SCORE, []);
+  ok(!liveLine(brief), 'no live line at all — not even an "(empty)" placeholder');
+});
+
+t('formatStageBrief omits the live line for a home-path publishedUrl rather than leaking it', () => {
+  const brief = formatStageBrief(
+    { ...BASE_POST, publishedUrl: '/Users/someone/status/42' },
+    PLATFORM_X,
+    CLEAN_SCORE,
+    []
+  );
+  ok(!liveLine(brief), 'no live line — junk is dropped silently, not stamped in as empty');
+  ok(!brief.includes('/Users/'), 'no fragment of the home path anywhere in the brief');
+  ok(!brief.includes('someone'), 'no fragment of the path segment anywhere in the brief');
+});
+
+t('formatStageBrief omits the live line for javascript: and other junk schemes', () => {
+  const junk = ['javascript:alert(1)', 'data:text/html,hi', 'ftp://x.com/jayson_x/status/42', 'not a url'];
+  for (const publishedUrl of junk) {
+    const brief = formatStageBrief({ ...BASE_POST, publishedUrl }, PLATFORM_X, CLEAN_SCORE, []);
+    ok(!liveLine(brief), `junk "${publishedUrl}" did not produce a live line`);
+  }
+});
+
+t('formatStageBrief strips a view-count query string from the live href rather than including it', () => {
+  const brief = formatStageBrief(
+    { ...BASE_POST, publishedUrl: 'https://x.com/jayson_x/status/42?views=999999&likes=1000' },
+    PLATFORM_X,
+    CLEAN_SCORE,
+    []
+  );
+  const line = liveLine(brief);
+  ok(line && line.endsWith('https://x.com/jayson_x/status/42'), 'the clean status link is still included');
+  ok(!brief.includes('views'), 'no "views" text anywhere in the brief');
+  ok(!brief.includes('999999'), 'no count number anywhere in the brief');
+  ok(!line.includes('?'), `no leftover query-string punctuation on the live line itself: ${JSON.stringify(line)}`);
+});
+
+t('formatStageBrief canonicalizes twitter.com to x.com on the live line, same as storage', () => {
+  const brief = formatStageBrief(
+    { ...BASE_POST, publishedUrl: 'https://twitter.com/jayson_x/status/42' },
+    PLATFORM_X,
+    CLEAN_SCORE,
+    []
+  );
+  const line = liveLine(brief);
+  ok(line && line.endsWith('https://x.com/jayson_x/status/42'), 'canonical x.com form, matching stored normalization');
+  ok(!brief.includes('twitter.com'), 'the raw twitter.com host does not survive into the brief');
+});
+
+t('formatStageBrief has no field name shaped like an engagement metric anywhere near the live line', () => {
+  const brief = formatStageBrief(
+    { ...BASE_POST, publishedUrl: 'https://x.com/jayson_x/status/42' },
+    PLATFORM_X,
+    CLEAN_SCORE,
+    []
+  );
+  ok(!/view|like|repl(y|ies)|quote|impress|follower/i.test(brief), 'no engagement-shaped word anywhere in the whole brief');
+});
+
+t('formatStageBrief includes the live href exactly once, not duplicated', () => {
+  const brief = formatStageBrief(
+    { ...BASE_POST, publishedUrl: 'https://x.com/jayson_x/status/42' },
+    PLATFORM_X,
+    CLEAN_SCORE,
+    []
+  );
+  const lines = brief.split('\n').filter((l) => /^Live/i.test(l) && l.includes('http'));
+  eq(lines.length, 1, 'exactly one live-href line, not repeated by a duplicated call');
+});
+
 function ok(v, msg) {
   if (!v) throw new Error(msg || 'expected truthy');
 }
