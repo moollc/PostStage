@@ -71,9 +71,18 @@ t('cloud-synced roots are treated as home paths', () => {
   }
 });
 
-t('a bare absolute path is skipped whatever it points at', () => {
-  eq(lastShopLine('writing to /var/log/poststage/output.log now'), '', 'absolute path');
+t('a tilde or dot-relative path is skipped; a file url too', () => {
+  eq(lastShopLine('writing to ~/Library/poststage/output.log now'), '', 'tilde path');
+  eq(lastShopLine('open ./certs/localhost.pem before you start'), '', 'dot path');
+  eq(lastShopLine('load ../.env.local before the pane boots up'), '', 'dotdot path');
   eq(lastShopLine('open file:///etc/hosts to see the mapping'), '', 'file url');
+});
+
+t('a slash in shop copy is kept — it is not a path', () => {
+  const spaced = 'cut the second sentence / keep the hook';
+  eq(lastShopLine(spaced), spaced, 'slash with spaces');
+  const tight = 'make the hook /snappier and cut the CTA';
+  eq(lastShopLine(tight), tight, 'tight /word aside');
 });
 
 // --- addresses and secrets ------------------------------------------------
