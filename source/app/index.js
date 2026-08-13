@@ -1502,7 +1502,9 @@ function paintBoard() {
     const copied = hasLastPaste(post);
     const noted = hasOutcomeNote(post);
     if (copied) row.dataset.copied = '1';
+    else delete row.dataset.copied;
     if (noted) row.dataset.noted = '1';
+    else delete row.dataset.noted;
     const pick = document.createElement('button');
     pick.type = 'button';
     pick.className = 'board-pick';

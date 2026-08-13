@@ -168,8 +168,20 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
   white-space: nowrap;
 }
 .board-noted {
-  border-color: #2a3d34;
-  color: #9aa5a0;
+  border-color: #344038;
+  color: var(--muted);
+}
+/* Reload: persisted data-noted / data-copied stay visible and readable */
+.board-row[data-noted] .board-noted,
+.board-row[data-copied] .board-copied {
+  display: inline-block !important;
+  visibility: visible;
+  opacity: 1;
+  flex: 0 0 auto;
+}
+/* Clear: empty outcome on active post — noted off, copied unchanged */
+body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
+  display: none !important;
 }
 .card.idea .idea-part-hint { text-transform: lowercase; opacity: 0.92; }
 .card.idea.needs-part:not(.empty) { box-shadow: 0 0 0 1px #e8a54b33; }
