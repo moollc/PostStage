@@ -1,4 +1,5 @@
 import { getPlatform } from './platforms.js';
+import { normalizePublishedUrl } from './published-url.js';
 
 const HOW_LABELS = {
   unknown: 'Unknown',
@@ -121,6 +122,7 @@ export function formatStageBrief(post, platform, scored, parts) {
     field('Call', post?.cta),
     `Tags: ${tagText(post?.hashtags)}`,
     field('Gen prompt', post?.genPrompt),
+    ...liveHrefLines(post),
     ...copiedPasteLines(post),
     unclaimed.length
       ? `Unclaimed parts: ${unclaimed.join(', ')}`
@@ -128,6 +130,24 @@ export function formatStageBrief(post, platform, scored, parts) {
     heuristic,
     'Which part is not doing its job? One line.'
   ].join('\n');
+}
+
+/**
+ * The live post's href, when there is one.
+ *
+ * Returns `[]` rather than an "(empty)" line so an unpublished post's brief
+ * reads as if the field never existed — a shop agent asked about a draft should
+ * not be told there is no link, only that there is a draft.
+ *
+ * Re-normalized here rather than trusted: the brief is the packet that leaves
+ * the machine, so this is the last place to catch a junk or path-shaped URL
+ * that reached the post some other way. Not scrubbed — `https://` would be
+ * eaten as a path. Views, guestScan, and home paths never belong here.
+ */
+function liveHrefLines(post) {
+  const href = normalizePublishedUrl(post?.publishedUrl);
+  if (!href) return [];
+  return [`Live URL: ${href}`];
 }
 
 /**
