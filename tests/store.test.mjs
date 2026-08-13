@@ -276,6 +276,40 @@ t('every post defaults to a null outcome', () => {
   eq(addPost(s).outcome, null, 'addPost default');
 });
 
+t('every post defaults to a null publishedUrl', () => {
+  const s = loadState();
+  eq(getActive(s).publishedUrl, null, 'blank default');
+  eq(addPost(s).publishedUrl, null, 'addPost default');
+});
+
+t('setPublishedUrl stores host + status id and strips query', () => {
+  const s = loadState();
+  const p = store.setPublishedUrl(s, s.activeId, 'https://twitter.com/Jayson_X/status/2087952991638716610?s=20');
+  eq(p.publishedUrl, 'https://x.com/Jayson_X/status/2087952991638716610', 'canonical');
+});
+
+t('setPublishedUrl rejects junk and clears on empty', () => {
+  const s = loadState();
+  store.setPublishedUrl(s, s.activeId, 'https://x.com/Jayson_X/status/2087952991638716610');
+  eq(store.setPublishedUrl(s, s.activeId, 'javascript:alert(1)').publishedUrl, null, 'javascript');
+  store.setPublishedUrl(s, s.activeId, 'https://x.com/Jayson_X/status/2087952991638716610');
+  eq(store.setPublishedUrl(s, s.activeId, '/Users/me/status.html').publishedUrl, null, 'home path');
+  store.setPublishedUrl(s, s.activeId, 'https://x.com/Jayson_X/status/2087952991638716610');
+  eq(store.setPublishedUrl(s, s.activeId, '').publishedUrl, null, 'empty clears');
+});
+
+t('publishedUrl survives save/load and does not touch outcome', () => {
+  const s = loadState();
+  store.setOutcome(s, s.activeId, 'quiet');
+  store.setPublishedUrl(s, s.activeId, 'https://x.com/Jayson_X/status/2087952991638716610');
+  const stamp = getActive(s).outcome.recordedAt;
+  saveState(s);
+  const back = getActive(loadState());
+  eq(back.publishedUrl, 'https://x.com/Jayson_X/status/2087952991638716610', 'url persisted');
+  eq(back.outcome.note, 'quiet', 'outcome kept');
+  eq(back.outcome.recordedAt, stamp, 'stamp kept');
+});
+
 t('setOutcome records a note and stamps recordedAt', () => {
   const s = loadState();
   const p = store.setOutcome(s, s.activeId, 'flopped, 3 likes');
@@ -933,6 +967,19 @@ t('the scorer never reads lastPaste', () => {
   eq(after.checks, clean.checks, 'checks identical');
   ok(!('lastPaste' in clean), 'scorePost does not echo lastPaste');
   ok(!clean.checks.some((c) => /paste|reach|impress/i.test(c.id + c.note)), 'no paste metrics in checks');
+});
+
+t('the scorer never reads publishedUrl', () => {
+  const s = loadState();
+  const p = scorable(s);
+  const platform = getPlatform('x');
+  const clean = scorePost(p, platform);
+  store.setPublishedUrl(s, s.activeId, 'https://x.com/Jayson_X/status/2087952991638716610');
+  const after = scorePost(getActive(s), platform);
+  eq(after.score, clean.score, 'score identical');
+  eq(after.checks, clean.checks, 'checks identical');
+  ok(!('publishedUrl' in clean), 'scorePost does not echo publishedUrl');
+  ok(!clean.checks.some((c) => /view|impress|url|href/i.test(c.id + c.note)), 'no url metrics in checks');
 });
 
 // --- quota honesty ----------------------------------------------------------

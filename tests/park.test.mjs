@@ -202,17 +202,19 @@ t('visiblePosts and parkedCount are safe on junk', () => {
   eq(parkedCount({}), 0, 'no posts array');
 });
 
-t('park never touches outcome, paste, status or source', () => {
+t('park never touches outcome, paste, status, source or publishedUrl', () => {
   const { s, b } = board();
   const post = s.posts.find((p) => p.id === b);
   post.status = 'published';
   post.publishedAt = '2026-08-13T00:00:00.000Z';
   post.source = 'banter';
+  post.publishedUrl = 'https://x.com/Jayson_X/status/2087952991638716610';
   setParked(s, b, true);
   const after = s.posts.find((p) => p.id === b);
   eq(after.status, 'published', 'status');
   eq(after.publishedAt, '2026-08-13T00:00:00.000Z', 'publishedAt');
   eq(after.source, 'banter', 'source');
+  eq(after.publishedUrl, 'https://x.com/Jayson_X/status/2087952991638716610', 'publishedUrl');
 });
 
 console.log(failed ? `\n${failed} FAILED` : '\nall park tests pass');

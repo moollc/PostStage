@@ -78,6 +78,19 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
   line-height: 1.2;
 }
 .thread-part-chrome[hidden] { display: none; }
+.x-video-gate {
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: var(--amber);
+  padding: 0.1rem 0.32rem;
+  border: 1px solid #4a4038;
+  border-radius: 4px;
+  background: #1a1510;
+  white-space: nowrap;
+  flex: none;
+  line-height: 1.2;
+}
+.x-video-gate[hidden] { display: none; }
 .stage-actions.copy-with-chrome { align-items: center; }
 .stage-actions.copy-with-chrome .stage-copy { flex: 1; }
 .agent-copy-wrap { min-width: 0; }
@@ -318,7 +331,7 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
 #thread-bar:not([hidden])[data-final="0"] + .outcome-block #outcome-prompt:not([hidden]):has(.outcome-rail:placeholder-shown) {
   display: none;
 }
-.outcome-block:not(:has(#last-paste-chip[data-platform], #last-paste-chip:not(:empty))):has(#outcome-prompt[hidden]) {
+.outcome-block:not(:has(#last-paste-chip[data-platform], #last-paste-chip:not(:empty))):has(#outcome-prompt[hidden]):not(:has(#f-published-url)) {
   margin: 0;
 }
 /* Reload: persisted lastPaste + outcome value stay visible (beat [hidden] / paint) */
@@ -441,7 +454,8 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
   min-width: 0;
   max-width: none;
 }
-.outcome-rail {
+.outcome-rail,
+.published-url-rail {
   width: 100%;
   padding: 0.38rem 0.45rem;
   font-size: 0.78rem;
@@ -450,7 +464,13 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
   background: #12151b;
   color: var(--ink);
 }
-.outcome-rail::placeholder { color: var(--muted); opacity: 0.85; }
+.outcome-rail::placeholder,
+.published-url-rail::placeholder { color: var(--muted); opacity: 0.85; }
+.published-url-label {
+  display: block;
+  margin: 0.35rem 0 0.22rem;
+  font-size: 0.72rem;
+}
 
 .idea-lane {
   grid-column: 1;
@@ -1114,6 +1134,10 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
   color: var(--ink);
 }
 .ledger-note { color: var(--amber); }
+.ledger-href {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ok);
+}
 .ledger-paste.none, .ledger-note.none { color: var(--muted); font-style: italic; }
 #score-block,
 #checks { scroll-margin-bottom: 5.75rem; }
