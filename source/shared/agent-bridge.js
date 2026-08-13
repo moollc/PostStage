@@ -43,6 +43,34 @@ export async function sendAgent(target, text) {
   return res.json();
 }
 
+/** Read recent unwrapped output from a Herdr pane. Requires `GET /api/agents/read`. */
+export async function readAgent(target) {
+  const id = String(target || '').trim();
+  if (!id) throw new Error('target_required');
+  const res = await fetch(`/api/agents/read?target=${encodeURIComponent(id)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'read_failed');
+  }
+  const data = await res.json();
+  return { text: String(data.text || '') };
+}
+
+const SHOP_SKIP = /^[\s│─┌┐└┘├┤┬┴┼╭╮╯╰═─\-+|]+$/;
+
+/** Last usable line from a shop read — skips prompts, box art, and noise. */
+export function lastShopLine(text) {
+  const lines = String(text || '').split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line || line.length < 12) continue;
+    if (line.startsWith('❯')) continue;
+    if (SHOP_SKIP.test(line)) continue;
+    return line;
+  }
+  return '';
+}
+
 /** Short label for a cwd — the tail two segments are what tells panes apart. */
 export function shortCwd(cwd) {
   const parts = String(cwd || '').split('/').filter(Boolean);

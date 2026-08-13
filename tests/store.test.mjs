@@ -359,5 +359,110 @@ t('outcome and source are not confused with the heuristic score', () => {
   ok(!('band' in getActive(s)), 'no band field written onto the post');
 });
 
+// --- shop ideas -----------------------------------------------------------
+
+t('addIdea appends a studio idea to the active post by default', () => {
+  const s = loadState();
+  const before = getActive(s).ideas.length;
+  const idea = store.addIdea(s, { text: 'a fresh angle' });
+  eq(getActive(s).ideas.length, before + 1, 'appended');
+  eq(idea.text, 'a fresh angle', 'text');
+  eq(idea.source, 'studio', 'defaults to studio');
+  eq(idea.part, '', 'part defaults to empty string');
+  ok(idea.id, 'has an id');
+  eq(getActive(s).ideas.at(-1).id, idea.id, 'it is the one that landed');
+});
+
+t('addIdea takes a shop idea', () => {
+  const s = loadState();
+  const idea = store.addIdea(s, { text: 'overheard on the floor', source: 'shop' });
+  eq(idea.source, 'shop', 'shop kept');
+  eq(getActive(s).ideas.at(-1).source, 'shop', 'stored on the post');
+});
+
+t('addIdea keeps an optional part', () => {
+  const s = loadState();
+  eq(store.addIdea(s, { text: 'a hook line', part: 'hook' }).part, 'hook', 'part kept');
+  eq(store.addIdea(s, { text: 'no part given' }).part, '', 'absent part is empty');
+  eq(store.addIdea(s, { text: 'bad part', part: 42 }).part, '', 'non-string part dropped');
+});
+
+t('addIdea trims text', () => {
+  const s = loadState();
+  eq(store.addIdea(s, { text: '   padded idea   ' }).text, 'padded idea', 'trimmed');
+});
+
+t('addIdea rejects empty text and appends nothing', () => {
+  const s = loadState();
+  const before = getActive(s).ideas.length;
+  eq(store.addIdea(s, { text: '' }), null, 'empty string');
+  eq(store.addIdea(s, { text: '    ' }), null, 'whitespace only');
+  eq(store.addIdea(s, {}), null, 'missing text');
+  eq(store.addIdea(s, { text: null }), null, 'null text');
+  eq(getActive(s).ideas.length, before, 'nothing was appended');
+});
+
+t('addIdea coerces an unknown source to studio', () => {
+  const s = loadState();
+  eq(store.addIdea(s, { text: 'x1', source: 'banter' }).source, 'studio', 'post source is not an idea source');
+  eq(store.addIdea(s, { text: 'x2', source: 'marketing' }).source, 'studio', 'nor marketing');
+  eq(store.addIdea(s, { text: 'x3', source: 'nonsense' }).source, 'studio', 'unknown string');
+  eq(store.addIdea(s, { text: 'x4', source: null }).source, 'studio', 'null');
+  eq(store.addIdea(s, { text: 'x5', source: 7 }).source, 'studio', 'number');
+});
+
+t('addIdea lands on the active post, not the first one', () => {
+  const s = loadState();
+  const first = s.activeId;
+  const second = addPost(s);
+  store.addIdea(s, { text: 'belongs to the second', source: 'shop' });
+  eq(second.ideas.length, 1, 'went to the active post');
+  eq(second.ideas[0].text, 'belongs to the second', 'the right idea');
+  eq(s.posts.find((p) => p.id === first).ideas.at(-1).text !== 'belongs to the second', true, 'not on the first');
+});
+
+t('shop ideas survive a save/load round trip', () => {
+  const s = loadState();
+  store.addIdea(s, { text: 'shop line one', source: 'shop', part: 'hook' });
+  store.addIdea(s, { text: 'studio line' });
+  saveState(s);
+  const back = loadState();
+  const ideas = getActive(back).ideas;
+  const shop = ideas.find((i) => i.text === 'shop line one');
+  eq(shop.source, 'shop', 'shop source persisted');
+  eq(shop.part, 'hook', 'part persisted');
+  eq(ideas.find((i) => i.text === 'studio line').source, 'studio', 'studio source persisted');
+});
+
+t('ideas stored without a source are read back as studio', () => {
+  mem.set(KEY, JSON.stringify({
+    activeId: 'p1',
+    posts: [{ id: 'p1', ideas: [
+      { id: 'i1', text: 'pre-shop idea' },
+      { id: 'i2', text: 'bad source', source: 'banter' },
+      { id: 'i3', text: 'already shop', source: 'shop' }
+    ] }]
+  }));
+  const ideas = getActive(loadState()).ideas;
+  eq(ideas[0].source, 'studio', 'missing backfilled');
+  eq(ideas[1].source, 'studio', 'post-vocabulary source coerced');
+  eq(ideas[2].source, 'shop', 'valid shop kept');
+  eq(ideas[0].text, 'pre-shop idea', 'text untouched');
+});
+
+t('the seed idea keeps its part and gains a source', () => {
+  const idea = getActive(loadState()).ideas[0];
+  eq(idea.part, 'hook', 'seed part preserved');
+  eq(idea.source, 'studio', 'seed source backfilled');
+});
+
+t('a migrated v1 idea gains a studio source', () => {
+  mem.set(LEGACY_KEY, JSON.stringify(V1));
+  const idea = getActive(loadState()).ideas[0];
+  eq(idea.source, 'studio', 'source');
+  eq(idea.part, 'hook', 'v1 part still preserved');
+  eq(idea.text, 'an idea', 'v1 text still preserved');
+});
+
 console.log(failed ? `\n${failed} FAILED` : '\nall store tests pass');
 process.exit(failed ? 1 : 0);
