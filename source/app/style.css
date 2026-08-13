@@ -471,6 +471,12 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
   margin: 0.35rem 0 0.22rem;
   font-size: 0.72rem;
 }
+#btn-guest-scan[hidden] { display: none; }
+.guest-scan-hint[hidden] { display: none; }
+.guest-scan-hint {
+  margin: 0.28rem 0 0;
+  font-size: 0.72rem;
+}
 
 .idea-lane {
   grid-column: 1;

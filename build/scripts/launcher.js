@@ -7,6 +7,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import net from 'net';
 import { isSafeRelPath, parseByteRange } from '../../source/shared/media-link.js';
 import { inboxIdFromItem, isSafeInboxId } from '../../source/shared/inbox-id.js';
+import { normalizePublishedUrl } from '../../source/shared/published-url.js';
+import { parseGuestHtml, normalizeGuestScan } from '../../source/shared/guest-scan.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT  = resolve(__dir, '../..');
@@ -174,6 +176,47 @@ function json(res, status, body) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(body));
+}
+
+function isLoopbackRequest(req) {
+  const a = String((req.socket && req.socket.remoteAddress) || '');
+  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
+}
+
+async function fetchGuestHtml(href) {
+  let current = href;
+  for (let hop = 0; hop < 4; hop++) {
+    const allowed = normalizePublishedUrl(current);
+    if (!allowed) return { error: 'invalid_url' };
+    let res;
+    try {
+      res = await fetch(allowed, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(8000),
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml;q=0.9'
+        }
+      });
+    } catch {
+      return { error: 'scan_failed' };
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      if (!loc) return { error: 'scan_failed' };
+      try {
+        current = new URL(loc, allowed).href;
+      } catch {
+        return { error: 'invalid_url' };
+      }
+      continue;
+    }
+    if (!res.ok) return { error: 'scan_failed' };
+    const html = await res.text();
+    return { html: String(html || '').slice(0, 400000) };
+  }
+  return { error: 'scan_failed' };
 }
 
 function readBody(req) {
@@ -466,6 +509,25 @@ async function handleRequest(req, res) {
 
   if (url.pathname === '/api/health' && req.method === 'GET') {
     return json(res, 200, healthPayload());
+  }
+
+  if (url.pathname === '/api/guest-scan' && req.method === 'POST') {
+    if (!isLoopbackRequest(req)) return json(res, 403, { error: 'loopback_only' });
+    let payload;
+    try { payload = JSON.parse(await readBody(req)); } catch {
+      return json(res, 400, { error: 'invalid_json' });
+    }
+    const href = normalizePublishedUrl(payload && payload.url);
+    if (!href) return json(res, 400, { error: 'invalid_url' });
+    const got = await fetchGuestHtml(href);
+    if (got.error) return json(res, 502, { error: got.error });
+    const parsed = parseGuestHtml(got.html);
+    const snap = normalizeGuestScan({
+      ...(parsed || {}),
+      at: new Date().toISOString()
+    });
+    if (!snap) return json(res, 502, { error: 'scan_failed' });
+    return json(res, 200, { ok: true, at: snap.at, title: snap.title, text: snap.text });
   }
 
   if (url.pathname === '/api/inbox' && req.method === 'GET') {

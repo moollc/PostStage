@@ -310,6 +310,66 @@ t('publishedUrl survives save/load and does not touch outcome', () => {
   eq(back.outcome.recordedAt, stamp, 'stamp kept');
 });
 
+t('every post defaults to a null guestScan', () => {
+  eq(getActive(loadState()).guestScan, null, 'blank');
+  eq(addPost(loadState()).guestScan, null, 'addPost');
+});
+
+t('setGuestScan keeps only at, title, text', () => {
+  const s = loadState();
+  const p = store.setGuestScan(s, s.activeId, {
+    at: '2026-08-13T20:00:00.000Z',
+    title: 'W1 title',
+    text: 'W1 text',
+    views: 26,
+    likes: 9
+  });
+  eq(p.guestScan, {
+    at: '2026-08-13T20:00:00.000Z',
+    title: 'W1 title',
+    text: 'W1 text'
+  }, 'identity only');
+  ok(!('views' in p.guestScan), 'no views');
+  ok(!('likes' in p.guestScan), 'no likes');
+});
+
+t('a failed setGuestScan keeps the last snapshot', () => {
+  const s = loadState();
+  const kept = {
+    at: '2026-08-13T20:00:00.000Z',
+    title: 'kept title',
+    text: 'kept text'
+  };
+  store.setGuestScan(s, s.activeId, kept);
+  store.setGuestScan(s, s.activeId, { views: 99 });
+  store.setGuestScan(s, s.activeId, null);
+  eq(getActive(s).guestScan, kept, 'still the last good snapshot');
+});
+
+t('changing publishedUrl clears guestScan; the same url does not', () => {
+  const s = loadState();
+  store.setPublishedUrl(s, s.activeId, 'https://x.com/Jayson_X/status/2087952991638716610');
+  store.setGuestScan(s, s.activeId, { at: '2026-08-13T20:00:00.000Z', title: 'W1', text: 'boxxy' });
+  store.setPublishedUrl(s, s.activeId, 'https://x.com/Jayson_X/status/2087952991638716610');
+  eq(getActive(s).guestScan.title, 'W1', 'same url keeps snapshot');
+  store.setPublishedUrl(s, s.activeId, 'https://x.com/other/status/1');
+  eq(getActive(s).guestScan, null, 'new url drops snapshot');
+});
+
+t('guestScan survives save/load without view fields', () => {
+  const s = loadState();
+  store.setGuestScan(s, s.activeId, {
+    at: '2026-08-13T20:00:00.000Z',
+    title: 'You wouldn\'t post a video you haven\'t watched, right?',
+    text: 'Slop Makers: BoxxyVid',
+    views: 26
+  });
+  saveState(s);
+  const back = getActive(loadState());
+  eq(Object.keys(back.guestScan).sort(), ['at', 'text', 'title'], 'shape');
+  eq(back.guestScan.text, 'Slop Makers: BoxxyVid', 'text');
+});
+
 t('setOutcome records a note and stamps recordedAt', () => {
   const s = loadState();
   const p = store.setOutcome(s, s.activeId, 'flopped, 3 likes');
@@ -980,6 +1040,18 @@ t('the scorer never reads publishedUrl', () => {
   eq(after.checks, clean.checks, 'checks identical');
   ok(!('publishedUrl' in clean), 'scorePost does not echo publishedUrl');
   ok(!clean.checks.some((c) => /view|impress|url|href/i.test(c.id + c.note)), 'no url metrics in checks');
+});
+
+t('the scorer never reads guestScan', () => {
+  const s = loadState();
+  const p = scorable(s);
+  const platform = getPlatform('x');
+  const clean = scorePost(p, platform);
+  store.setGuestScan(s, s.activeId, { at: '2026-08-13T20:00:00.000Z', title: 'viral', text: '26 views' });
+  const after = scorePost(getActive(s), platform);
+  eq(after.score, clean.score, 'score identical');
+  eq(after.checks, clean.checks, 'checks identical');
+  ok(!('guestScan' in clean), 'scorePost does not echo guestScan');
 });
 
 // --- quota honesty ----------------------------------------------------------
