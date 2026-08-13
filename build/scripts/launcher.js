@@ -6,6 +6,7 @@ import { extname, resolve, dirname, relative } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import net from 'net';
 import { isSafeRelPath, parseByteRange } from '../../source/shared/media-link.js';
+import { inboxIdFromItem, isSafeInboxId } from '../../source/shared/inbox-id.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT  = resolve(__dir, '../..');
@@ -280,8 +281,42 @@ function persistableInboxMedia(raw) {
   return out.slice(0, 1);
 }
 
+/**
+ * `Cache-Control` for a static file, or '' to leave the header off.
+ *
+ * The app's own source — HTML, JS, CSS — is `no-store`. This is a local
+ * development canvas that is edited while it runs; a stale stylesheet held by
+ * the service worker means the operator sees yesterday's app and has to know
+ * to hard-refresh. Correctness beats a cache hit over loopback.
+ *
+ * Media is deliberately excluded: `/image` serves range requests for video, and
+ * `no-store` there would refetch on every seek. Fonts and icons are excluded
+ * for the same reason — they do not change while someone is editing the app.
+ */
+const NO_STORE_EXT = new Set(['.html', '.js', '.mjs', '.css', '.json', '.map']);
+
+function cacheControlFor(filePath) {
+  const ext = extname(String(filePath || '')).toLowerCase();
+  return NO_STORE_EXT.has(ext) ? 'no-store' : '';
+}
+
 function inboxId() {
   return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function stampInboxPosts(posts) {
+  if (!Array.isArray(posts)) return { posts: [], dirty: false };
+  let dirty = false;
+  const out = posts.map((p) => {
+    if (!p || typeof p !== 'object') return p;
+    const id = inboxIdFromItem(p);
+    if (id && id !== String(p.id || '').trim()) {
+      dirty = true;
+      return { ...p, id };
+    }
+    return p;
+  });
+  return { posts: out, dirty };
 }
 
 function readInboxPosts() {
@@ -300,13 +335,14 @@ function readInboxPosts() {
       const seed = JSON.parse(readFileSync(INBOX_SEED, 'utf8'));
       if (Array.isArray(seed.posts) && seed.posts.length) {
         posts = seed.posts;
-        writeFileSync(INBOX_FILE, JSON.stringify({ posts }, null, 2));
       }
     } catch {
       /* empty inbox */
     }
   }
-  return posts;
+  const stamped = stampInboxPosts(posts);
+  if (stamped.dirty) writeInboxPosts(stamped.posts);
+  return stamped.posts;
 }
 
 function writeInboxPosts(posts) {
@@ -431,7 +467,9 @@ async function handleRequest(req, res) {
     }
     const posts = readInboxPosts();
     const entry = {
-      id: String(payload.id || '').trim() || inboxId(),
+      id: isSafeInboxId(String(payload.id || '').trim())
+        ? String(payload.id).trim()
+        : inboxId(),
       title: String(payload.title || ''),
       hook: String(payload.hook || ''),
       body: String(payload.body || ''),
@@ -545,6 +583,9 @@ async function handleRequest(req, res) {
     const sw = readFileSync(resolve(ROOT, 'service-worker.js'), 'utf8')
       .replace('__CACHE_VERSION__', isDev ? `dev-${swVersion}` : swVersion);
     res.setHeader('Content-Type', 'application/javascript');
+    // The worker decides what everything else caches, so it must never be
+    // served from a cache itself.
+    res.setHeader('Cache-Control', 'no-store');
     res.end(sw);
     return;
   }
@@ -552,7 +593,10 @@ async function handleRequest(req, res) {
   const rel = url.pathname === '/' ? '/index.html' : url.pathname;
   let filePath = resolve(ROOT, `.${rel}`);
   if (!filePath.startsWith(ROOT) || !existsSync(filePath)) filePath = resolve(ROOT, '404.html');
-  res.setHeader('Content-Type', MIME[extname(filePath)] || 'application/octet-stream');
+  const mime = MIME[extname(filePath)] || 'application/octet-stream';
+  res.setHeader('Content-Type', mime);
+  const cache = cacheControlFor(filePath);
+  if (cache) res.setHeader('Cache-Control', cache);
   createReadStream(filePath).on('error', () => res.end()).pipe(res);
 }
 

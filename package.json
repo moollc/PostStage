@@ -31,6 +31,8 @@
     "test:video-link": "node tests/video-link.test.mjs",
     "test:ledger": "node tests/ledger.test.mjs",
     "test:inbox-still": "node tests/inbox-still.test.mjs",
+    "test:inbox-id": "node tests/inbox-id.test.mjs",
+    "test:browser-inbox-id": "node tests/browser-inbox-id.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
   },
   "dependencies": {},
