@@ -315,6 +315,44 @@ t('formatStageBrief includes the live href exactly once, not duplicated', () => 
   eq(lines.length, 1, 'exactly one live-href line, not repeated by a duplicated call');
 });
 
+t('formatStageBrief closer tells the pane to open the live href', () => {
+  const brief = formatStageBrief(
+    { ...BASE_POST, publishedUrl: 'https://x.com/jayson_x/status/42' },
+    PLATFORM_X,
+    CLEAN_SCORE,
+    []
+  );
+  const last = brief.split('\n').pop();
+  ok(/^Open /i.test(last), `closer was ${JSON.stringify(last)}`);
+  ok(last.includes('https://x.com/jayson_x/status/42'), 'closer carries the href');
+  ok(last.endsWith('Which part is not doing its job? One line.'), 'still asks which part');
+});
+
+t('formatStageBrief closer stays the draft question without a URL', () => {
+  const brief = formatStageBrief(BASE_POST, PLATFORM_X, CLEAN_SCORE, []);
+  eq(brief.split('\n').pop(), 'Which part is not doing its job? One line.', 'draft closer');
+});
+
+t('formatStageBrief closer does not leak a home path or views query', () => {
+  const home = formatStageBrief(
+    { ...BASE_POST, publishedUrl: '/Users/someone/status/42' },
+    PLATFORM_X,
+    CLEAN_SCORE,
+    []
+  );
+  ok(!home.includes('/Users/'), 'home path in a no-url brief');
+  ok(!/^Open /i.test(home.split('\n').pop()), 'Open on junk');
+  const messy = formatStageBrief(
+    { ...BASE_POST, publishedUrl: 'https://x.com/jayson_x/status/42?views=9' },
+    PLATFORM_X,
+    CLEAN_SCORE,
+    []
+  );
+  const last = messy.split('\n').pop();
+  ok(last.includes('https://x.com/jayson_x/status/42'), 'canonical in closer');
+  ok(!last.includes('views') && !/\?views=/.test(last), `query in closer: ${JSON.stringify(last)}`);
+});
+
 function ok(v, msg) {
   if (!v) throw new Error(msg || 'expected truthy');
 }

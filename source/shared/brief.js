@@ -128,8 +128,23 @@ export function formatStageBrief(post, platform, scored, parts) {
       ? `Unclaimed parts: ${unclaimed.join(', ')}`
       : 'Unclaimed parts: none',
     heuristic,
-    'Which part is not doing its job? One line.'
+    closerFor(post)
   ].join('\n');
+}
+
+/**
+ * The question the brief ends on.
+ *
+ * A live href in the field list is not enough — the pane can ignore it and
+ * judge the draft. When a canonical status URL exists, the last line tells
+ * the pane to open that href, then asks which part is failing (one line).
+ * When there is none, keep the draft closer. The href is re-normalized so
+ * junk, queries, and home paths never reach the closer.
+ */
+function closerFor(post) {
+  const href = normalizePublishedUrl(post?.publishedUrl);
+  if (!href) return 'Which part is not doing its job? One line.';
+  return `Open ${href}. Which part is not doing its job? One line.`;
 }
 
 /**

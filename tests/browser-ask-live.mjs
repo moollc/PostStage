@@ -124,7 +124,11 @@ try {
   if (await page.locator('.board-live').count()) fail('a fourth board mark appeared');
   if (await page.locator('#agent-ask').count() !== 1) fail('Ask shop control missing');
 
-  console.log('ok    Ask shop brief includes Live href, not views; no fourth mark');
+  const last = packet.trim().split('\n').pop();
+  const wantCloser = `Open ${W1_PUBLISHED_URL}. Which part is not doing its job? One line.`;
+  if (last !== wantCloser) fail(`closer was ${JSON.stringify(last)}, expected ${JSON.stringify(wantCloser)}`);
+
+  console.log('ok    Ask shop brief includes Live href; closer opens it; not views; no fourth mark');
 } finally {
   await browser.close();
 }

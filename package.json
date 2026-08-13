@@ -50,6 +50,7 @@
     "test:browser-copy-live": "node tests/browser-copy-live.mjs",
     "test:brief": "node tests/brief.test.mjs",
     "test:ask-live": "node tests/ask-live.test.mjs",
+    "test:ask-open": "node tests/ask-open.test.mjs",
     "test:browser-ask-live": "node tests/browser-ask-live.mjs",
     "test:x-playbook": "node tests/x-playbook.test.mjs",
     "test:nostore": "node tests/nostore.test.mjs",
