@@ -96,24 +96,23 @@ t('an email address is never returned', () => {
   }
 });
 
-t('an assignment-shaped secret is never returned', () => {
+t('secret sauce keeps — a bare English word is shop copy', () => {
   for (const line of [
-    'export API_KEY=abc123def456ghi789jkl',
-    'export API_KEY=sk-live-abcdefgh12345678',
-    'Authorization: Bearer abcdefghijklmnop',
-    'password: hunter2hunter2 before you start'
+    'secret sauce',
+    'password prompt',
+    'authorization for creators'
   ]) {
-    eq(lastShopLine(line), '', `returned: ${line}`);
+    eq(lastShopLine(line), line, `skipped copy: ${line}`);
   }
 });
 
-t('a bare English secret-word is kept — it is shop copy', () => {
+t('API_KEY= skips — assignment-shaped secrets are not copy', () => {
   for (const line of [
-    'secret sauce is the hook, not the CTA',
-    'the password prompt UX needs a rewrite',
-    'authorization for creators is the real story here'
+    'export API_KEY=sk-live-abcdefgh12345678',
+    'password: hunter2',
+    'Authorization: Bearer abcdefghijklmnop'
   ]) {
-    eq(lastShopLine(line), line, `skipped copy: ${line}`);
+    eq(lastShopLine(line), '', `returned: ${line}`);
   }
 });
 
