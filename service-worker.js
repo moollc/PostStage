@@ -10,6 +10,7 @@ const ASSETS = [
   '/source/shared/store.js',
   '/source/shared/compress-still.js',
   '/source/shared/inbox-id.js',
+  '/source/shared/published-url.js',
   '/source/shared/score.js',
   '/source/shared/playbook.js',
   '/source/shared/platforms.js',

@@ -103,6 +103,13 @@ t('a row has only id, title and the fields that had content', () => {
   eq(Object.keys(pasteOnly).sort(), ['id', 'paste', 'title'], 'no empty note key');
   const noteOnly = formatLedger([post({ lastPaste: null })])[0];
   eq(Object.keys(noteOnly).sort(), ['id', 'note', 'title'], 'no empty paste key');
+  const hrefOnly = formatLedger([post({
+    lastPaste: null,
+    outcome: null,
+    publishedUrl: 'https://x.com/Jayson_X/status/2087952991638716610'
+  })])[0];
+  eq(Object.keys(hrefOnly).sort(), ['href', 'id', 'title'], 'url-only row');
+  eq(hrefOnly.href, 'https://x.com/Jayson_X/status/2087952991638716610', 'href kept');
 });
 
 t('ledger.js source contains no arithmetic on row values', () => {
@@ -130,6 +137,31 @@ t('a post with a note but no paste is still listed', () => {
 t('a post with neither is omitted', () => {
   eq(formatLedger([post({ lastPaste: null, outcome: null })]).length, 0, 'omitted');
   eq(formatLedger([post({ lastPaste: { text: '   ' }, outcome: { note: '\n' } })]).length, 0, 'whitespace is empty');
+});
+
+t('a post with only a publishedUrl is listed', () => {
+  const rows = formatLedger([post({
+    lastPaste: null,
+    outcome: null,
+    publishedUrl: 'https://x.com/Jayson_X/status/2087952991638716610'
+  })]);
+  eq(rows.length, 1, 'listed');
+  eq(rows[0].href, 'https://x.com/Jayson_X/status/2087952991638716610', 'href');
+  eq(rows[0].paste, undefined, 'no paste');
+  eq(rows[0].note, undefined, 'no note');
+});
+
+t('junk publishedUrl is not a ledger href', () => {
+  eq(formatLedger([post({
+    lastPaste: null,
+    outcome: null,
+    publishedUrl: 'javascript:alert(1)'
+  })]).length, 0, 'javascript omitted');
+  eq(formatLedger([post({
+    lastPaste: null,
+    outcome: null,
+    publishedUrl: '/Users/me/clip'
+  })]).length, 0, 'home path omitted');
 });
 
 t('rows keep board order', () => {

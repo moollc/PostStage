@@ -8,9 +8,24 @@ export const PARTS = [
 ];
 
 const INTERACTIONS = {
+  // X guidance below is read from published defaults in
+  // xai-org/x-algorithm → home-mixer/params/param.rs (Apache-2.0), not from
+  // folklore. Relative prices there: copy-link share 20, reply/quote/DM-share 5,
+  // follow 4, repost 1, like 0.5, video-quality-view 0.05. Those are weights on
+  // predicted actions inside For You ranking — they are NOT a score, and nothing
+  // here is summed, ranked, or fed to the heuristic.
   x: {
-    expect: ['quote-posts that add a case', 'replies within the first hour', 'bookmark for later reference'],
-    practices: ['Ask one specific question the reply can answer', 'Reply to the first ten as if they are guests', 'Do not dunk on your own audience']
+    expect: [
+      'a copy-link share into a group chat — priced far above a like',
+      'replies and quote-posts, the conversation signals',
+      'likes, which cost the reader least and are worth least'
+    ],
+    practices: [
+      'Write a line worth pasting into a DM, not just tapping',
+      'Ask one specific question a reply can actually answer',
+      'Reply to the first ten as if they are guests',
+      'A clip under ten seconds falls below the video-duration floor'
+    ]
   },
   instagram: {
     expect: ['saves for later', 'shares to stories', 'comment keywords tied to the CTA'],
@@ -44,10 +59,16 @@ const MONETIZE = {
 };
 
 const EFFECTS = {
+  // Ordered by the published weights in x-algorithm home-mixer/params/param.rs,
+  // heaviest first. Descriptions say what the action is worth relative to the
+  // others — never a predicted number, never a rank.
   x: [
-    { action: 'Reply', effect: 'Feeds the algorithm a conversation signal, ranks it into more feeds' },
-    { action: 'Quote-post', effect: 'Puts it in front of a new audience with borrowed context' },
-    { action: 'Bookmark', effect: 'Private save — no reach boost, but marks real intent to return' }
+    { action: 'Copy-link share', effect: 'The most heavily weighted positive action X publishes — someone pasting it elsewhere' },
+    { action: 'Reply or quote-post', effect: 'Conversation signals, weighted well below a copy-link share but far above a like' },
+    { action: 'Repost', effect: 'Counts, but well below a reply — passing it on costs the reader almost nothing' },
+    { action: 'Like', effect: 'The cheapest action to give and among the least weighted — a poor read on whether it landed' },
+    { action: 'Video view', effect: 'In the model but weakly weighted, and clips under ten seconds fall below the duration floor' },
+    { action: 'Mute, block or report', effect: 'Negative by a wide margin — far heavier than any positive action' }
   ],
   instagram: [
     { action: 'Save', effect: 'Strongest ranking signal on the platform — pushes it to Explore' },

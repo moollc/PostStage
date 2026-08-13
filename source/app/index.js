@@ -1,5 +1,5 @@
 import { loadPlatforms, getPlatforms, getPlatform } from '/source/shared/platforms.js';
-import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, setLastPaste, addIdea, rememberStageWrite, undoStageWrite, mediaPersists, setParked, visiblePosts, parkedCount } from '/source/shared/store.js';
+import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, setLastPaste, setPublishedUrl, addIdea, rememberStageWrite, undoStageWrite, mediaPersists, setParked, visiblePosts, parkedCount } from '/source/shared/store.js';
 import { scorePostMaybeWasm } from '/source/shared/score.js';
 import { structureFor, interactionsFor, monetizeFor, effectsFor, PARTS } from '/source/shared/playbook.js';
 import { listAgents, sendAgent, readAgent, lastShopLine, shortCwd } from '/source/shared/agent-bridge.js';
@@ -9,6 +9,7 @@ import { isSafeRelPath, mediaSrcForPath, IMAGE_ROUTE_PROBE, imageRouteFromHealth
 import { formatLedger } from '/source/shared/ledger.js';
 import { compressStill, IMAGE_PERSIST_BUDGET } from '/source/shared/compress-still.js';
 import { inboxIdFromItem } from '/source/shared/inbox-id.js';
+import { normalizePublishedUrl, W1_POST_ID, W1_PUBLISHED_URL } from '/source/shared/published-url.js';
 
 const canvas = document.getElementById('canvas');
 const wrap = canvas.parentElement;
@@ -17,6 +18,13 @@ const plats = document.getElementById('plats');
 
 let state = loadState();
 if (state.ideaLayout !== 'stack' && state.ideaLayout !== 'free') state.ideaLayout = 'stack';
+{
+  const w1 = state.posts.find((p) => p.id === W1_POST_ID);
+  if (w1 && !w1.publishedUrl) {
+    setPublishedUrl(state, w1.id, W1_PUBLISHED_URL);
+    saveState(state);
+  }
+}
 let copiedIds = new Set();
 const threadCursor = { key: '', index: 0 };
 let railSeq = 0;
@@ -27,6 +35,10 @@ let spaceDown = false;
 const view = { x: 0, y: 0, scale: 1 };
 /** This-sitting blob URLs for clips that already have a persistable path/href. */
 const sessionClips = new Map();
+/** Clip duration (seconds) read from stage preview metadata, keyed by post id. */
+const videoDurationByPost = new Map();
+/** X For You mixer minimum from x-algorithm MinVideoDurationMs. */
+const X_MIN_VIDEO_SEC = 10;
 /** Whether the live launcher handles `/image?path=`. null until probed. */
 let imageRouteLive = null;
 
@@ -200,6 +212,56 @@ function isVideoMedia(m) {
   const path = String(m.path || '');
   if (url.startsWith('data:video/')) return true;
   return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url) || /\.(mp4|webm|mov|m4v)$/i.test(path);
+}
+
+function formatClipSec(dur) {
+  if (!Number.isFinite(dur)) return '';
+  if (dur >= 10) return String(Math.round(dur));
+  const one = Math.round(dur * 10) / 10;
+  return one % 1 === 0 ? String(Math.floor(one)) : one.toFixed(1);
+}
+
+function xVideoUnderMin(post, platform) {
+  if (!post || platform.id !== 'x') return false;
+  const m = post.media && post.media[0];
+  if (!isVideoMedia(m)) return false;
+  const dur = videoDurationByPost.get(post.id);
+  if (!Number.isFinite(dur) || dur <= 0) return false;
+  return dur < X_MIN_VIDEO_SEC;
+}
+
+function xVideoGateLabel(dur) {
+  const sec = formatClipSec(dur);
+  return sec ? `${sec}s — under X’s 10s minimum` : 'Under 10s for X';
+}
+
+function paintXVideoGate(el, post, platform) {
+  if (!el) return;
+  const under = xVideoUnderMin(post, platform);
+  el.hidden = !under;
+  if (!under) {
+    el.textContent = '';
+    el.removeAttribute('title');
+    return;
+  }
+  const dur = videoDurationByPost.get(post.id);
+  el.textContent = xVideoGateLabel(dur);
+  el.title = 'X’s For You mixer expects at least 10s of video';
+}
+
+function paintXVideoGates() {
+  const post = getActive(state);
+  const platform = getPlatform(post.platform);
+  for (const id of ['x-video-gate-top', 'x-video-gate-stage', 'x-video-gate-dock']) {
+    paintXVideoGate(document.getElementById(id), post, platform);
+  }
+}
+
+function noteVideoDuration(postId, dur) {
+  if (!Number.isFinite(dur) || dur <= 0) return;
+  videoDurationByPost.set(postId, dur);
+  if (getActive(state).id !== postId) return;
+  paintXVideoGates();
 }
 
 function isUsableBlob(m) {
@@ -597,6 +659,7 @@ function paintThreadChrome() {
       el.textContent = label;
     }
   }
+  paintXVideoGates();
 }
 
 function advanceThreadPart() {
@@ -652,6 +715,17 @@ function bindOutcomeField(how, post) {
     persist();
     paintBoard();
     // The ledger reads outcome; without this it stays stale until a full render.
+    scheduleJudgement();
+  });
+}
+
+function bindPublishedUrlField(el, post) {
+  if (!el) return;
+  el.value = post.publishedUrl || '';
+  el.addEventListener('change', () => {
+    setPublishedUrl(state, post.id, el.value);
+    el.value = getActive(state).publishedUrl || '';
+    persist();
     scheduleJudgement();
   });
 }
@@ -725,6 +799,10 @@ function stageCard() {
 
   const actions = document.createElement('div');
   actions.className = 'stage-actions copy-with-chrome';
+  const gate = document.createElement('span');
+  gate.id = 'x-video-gate-stage';
+  gate.className = 'x-video-gate';
+  gate.hidden = true;
   const threadChrome = document.createElement('span');
   threadChrome.id = 'thread-part-chrome-stage';
   threadChrome.className = 'thread-part-chrome';
@@ -735,8 +813,9 @@ function stageCard() {
   copyLive.textContent = 'Copy';
   copyLive.setAttribute('aria-label', 'Copy live post for paste');
   copyLive.addEventListener('click', (e) => e.stopPropagation());
-  actions.append(threadChrome, copyLive);
+  actions.append(gate, threadChrome, copyLive);
   el.appendChild(actions);
+  paintXVideoGate(gate, post, platform);
   bindLiveCopy(copyLive);
 
   bindDrag(el, post);
@@ -797,6 +876,7 @@ async function attachLocalFile(file, imageOnly) {
   if (prev && prev.url && String(prev.url).startsWith('blob:')) URL.revokeObjectURL(prev.url);
 
   if (file.type.startsWith('video/')) {
+    videoDurationByPost.delete(post.id);
     const name = fileBasename(file.name);
     const linked = await linkLocalVideo(file);
     const path = (linked && linked.path) || (isSafeRelPath(name) ? name : '');
@@ -867,6 +947,7 @@ async function attachLocalFile(file, imageOnly) {
 
 function clearLocalMedia() {
   const post = getActive(state);
+  videoDurationByPost.delete(post.id);
   const live = sessionClips.get(post.id);
   if (live) {
     URL.revokeObjectURL(live);
@@ -977,14 +1058,16 @@ function bindStageMediaSlot(preview) {
 function primeVideoFrame(preview) {
   const vid = preview.querySelector('video.media-vid');
   if (!vid) return;
-  const seek = () => {
+  const postId = getActive(state).id;
+  const onMeta = () => {
     const dur = vid.duration;
+    if (Number.isFinite(dur) && dur > 0) noteVideoDuration(postId, dur);
     if (!Number.isFinite(dur) || dur <= 0) return;
     if (vid.currentTime >= 0.05) return;
     vid.currentTime = Math.min(0.1, Math.max(0.01, dur * 0.1));
   };
-  if (vid.readyState >= 1) seek();
-  else vid.addEventListener('loadedmetadata', seek, { once: true });
+  if (vid.readyState >= 1) onMeta();
+  else vid.addEventListener('loadedmetadata', onMeta, { once: true });
 }
 
 function bindDrag(el, obj) {
@@ -1226,6 +1309,8 @@ async function renderRail() {
       <div id="outcome-prompt" class="outcome-prompt"${showOutcome ? '' : ' hidden'}>
         <input id="f-outcome" type="text" class="outcome-rail" value="${escapeHtml((post.outcome && post.outcome.note) || '')}" placeholder="What you saw — optional" aria-label="What happened?">
       </div>
+      <label class="hint published-url-label" for="f-published-url">Live URL</label>
+      <input id="f-published-url" type="url" class="published-url-rail" value="${escapeHtml(post.publishedUrl || '')}" placeholder="https://x.com/…/status/…" aria-label="Published URL">
     </div>
 
     <h2>Structure · what each part does</h2>
@@ -1258,6 +1343,7 @@ async function renderRail() {
       <button type="button" id="agent-ask">Ask shop</button>
       <button type="button" id="agent-keep">Keep shop line</button>
       <div class="copy-with-chrome agent-copy-wrap">
+        <span id="x-video-gate-dock" class="x-video-gate" hidden></span>
         <span id="thread-part-chrome-dock" class="thread-part-chrome" hidden></span>
         <button type="button" id="agent-copy">Copy</button>
       </div>
@@ -1287,6 +1373,7 @@ async function renderRail() {
   });
   const outcomeInput = rail.querySelector('#f-outcome');
   if (outcomeInput) bindOutcomeField(outcomeInput, post);
+  bindPublishedUrlField(rail.querySelector('#f-published-url'), post);
   paintOutcomePrompt();
   paintSaveError();
   bindCopyOut(document.getElementById('btn-copy-out'));
@@ -1429,8 +1516,8 @@ function paintLedger(scored) {
   const scoreById = scored && scored.band ? { [active.id]: { band: scored.band } } : null;
   const rows = formatLedger(state.posts, scoreById);
 
-  if (!rows.length) {
-    box.innerHTML = '<p class="hint">Nothing copied or noted yet. Copy a post, then say what happened.</p>';
+    if (!rows.length) {
+    box.innerHTML = '<p class="hint">Nothing copied, noted, or linked yet. Copy a post, then say what happened — or drop the live URL.</p>';
     return;
   }
 
@@ -1442,11 +1529,15 @@ function paintLedger(scored) {
     const note = row.note
       ? `<span class="ledger-note" title="${escapeHtml(row.note)}">${escapeHtml(row.note)}</span>`
       : '<span class="ledger-note none">no note yet</span>';
+    const href = row.href
+      ? `<a class="ledger-href" href="${escapeHtml(row.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(row.href)}</a>`
+      : '';
     const here = row.id === active.id ? ' here' : '';
     return `<div class="ledger-row${here}" data-id="${escapeHtml(row.id)}">
       <span class="ledger-title">${escapeHtml(row.title)}</span>${band}
       ${paste}
       ${note}
+      ${href}
     </div>`;
   }).join('');
 }
@@ -2108,7 +2199,10 @@ async function pullInbox() {
         audience: item.audience || '',
         audienceHow: item.audience ? 'stated' : 'unknown',
         source: item.source || 'banter',
-        media: inboxStill(item.media)
+        media: inboxStill(item.media),
+        publishedUrl: id === W1_POST_ID
+          ? (normalizePublishedUrl(item.publishedUrl) || W1_PUBLISHED_URL)
+          : item.publishedUrl
       });
       have.add(id);
       added = true;

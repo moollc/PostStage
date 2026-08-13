@@ -14,6 +14,10 @@
  * { note, recordedAt } — an operator's record of what actually happened, kept
  * deliberately separate from the heuristic score.
  *
+ * `publishedUrl` is `null` or a normalized `https://x.com/{handle}/status/{id}`
+ * href (host + status id; query stripped). It is not a view count and it is
+ * not the local `status: 'published'` toggle.
+ *
  * `lastPaste` is `null` or `{ text, platformId, partIndex, at, stage? }` — the exact
  * string that last landed on the clipboard. Written only on successful Copy.
  * `stage` is hook/body/cta/hashtags at that Copy, for formatThread of the snapshot.
@@ -43,6 +47,7 @@
  */
 
 import { isSafeRelPath, mediaSrcForPath } from './media-link.js';
+import { normalizePublishedUrl } from './published-url.js';
 
 const KEY = 'poststage.v2';
 const LEGACY_KEY = 'poststage.v1';
@@ -69,6 +74,7 @@ function blankPost(overrides = {}) {
     audienceHow: 'unknown',
     status: 'draft',
     publishedAt: null,
+    publishedUrl: null,
     source: DEFAULT_SOURCE,
     outcome: null,
     lastPaste: null,
@@ -182,6 +188,7 @@ function migrate(v1) {
     ideas: Array.isArray(ideas) ? ideas : [],
     status: 'draft',
     publishedAt: null,
+    publishedUrl: null,
     // v1 predates both fields; a migrated post is studio work with no outcome yet.
     source: normalizeSource(post.source),
     outcome: normalizeOutcome(post.outcome)
@@ -269,6 +276,7 @@ function normalize(board) {
       media: persistableMedia(p.media),
       status: p.status === 'published' ? 'published' : 'draft',
       publishedAt: p.status === 'published' ? (p.publishedAt || null) : null,
+      publishedUrl: normalizePublishedUrl(p.publishedUrl),
       // Boards written before source/outcome existed pick up the defaults here.
       source: normalizeSource(p.source),
       outcome: normalizeOutcome(p.outcome),
@@ -382,6 +390,7 @@ export function addPost(state, overrides = {}) {
   post.outcome = normalizeOutcome(post.outcome);
   post.lastPaste = normalizeLastPaste(post.lastPaste);
   post.stageUndo = normalizeStageUndo(post.stageUndo);
+  post.publishedUrl = normalizePublishedUrl(post.publishedUrl);
   state.posts.push(post);
   state.activeId = post.id;
   return post;
@@ -470,6 +479,18 @@ export function setOutcome(state, id, note) {
     note: next.note,
     recordedAt: next.recordedAt || new Date().toISOString()
   };
+  return post;
+}
+
+/**
+ * Store the live network URL for a post. Normalized to host + status id.
+ * Empty or junk clears to `null`. Does not fetch, and does not touch
+ * outcome, lastPaste, or local published status.
+ */
+export function setPublishedUrl(state, id, raw) {
+  const post = state.posts.find((p) => p.id === id);
+  if (!post) return null;
+  post.publishedUrl = normalizePublishedUrl(raw);
   return post;
 }
 

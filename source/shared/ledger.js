@@ -1,8 +1,9 @@
 /**
  * Read-only outcome ledger.
  *
- * Shows, for posts that have a paste or a note: the frozen paste line, the
- * operator's own note, and the heuristic band **if one was already computed**.
+ * Shows, for posts that have a paste, a note, or a live href: the frozen
+ * paste line, the operator's own note, the href, and the heuristic band
+ * **if one was already computed**.
  *
  * Three things this module deliberately does not do, and they are the design,
  * not omissions:
@@ -30,6 +31,14 @@ function noteLine(post) {
   return String(note || '').replace(/\s+/g, ' ').trim();
 }
 
+/** Already-normalized live href. Empty or junk stays empty — no fetch. */
+function hrefLine(post) {
+  const href = post && post.publishedUrl;
+  const s = String(href || '').trim();
+  if (!/^https:\/\/x\.com\/[A-Za-z0-9_]+\/status\/\d{1,20}$/.test(s)) return '';
+  return s;
+}
+
 /** Only the bands the heuristic actually produces. Anything else is dropped. */
 const BANDS = ['ready', 'draft', 'thin'];
 
@@ -48,13 +57,13 @@ function bandFor(id, scoreById) {
 /**
  * Rows for the ledger, in board order.
  *
- * A post is listed when it has a paste **or** a note — "shipped it, never
- * followed up" is itself a finding and must not be filtered out. An empty
- * field is omitted from the row rather than rendered blank.
+ * A post is listed when it has a paste, a note, **or** a live href —
+ * "shipped it, dropped the URL" is itself a finding. An empty field is
+ * omitted from the row rather than rendered blank.
  *
  * @param {object[]} posts
  * @param {Map|object} [scoreById] — already-computed scores, keyed by post id
- * @returns {{id:string,title:string,paste?:string,note?:string,band?:string}[]}
+ * @returns {{id:string,title:string,paste?:string,note?:string,href?:string,band?:string}[]}
  */
 export function formatLedger(posts, scoreById) {
   if (!Array.isArray(posts)) return [];
@@ -63,7 +72,8 @@ export function formatLedger(posts, scoreById) {
     if (!post || typeof post !== 'object') continue;
     const paste = pasteLine(post);
     const note = noteLine(post);
-    if (!paste && !note) continue;
+    const href = hrefLine(post);
+    if (!paste && !note && !href) continue;
 
     const row = {
       id: String(post.id || ''),
@@ -71,6 +81,7 @@ export function formatLedger(posts, scoreById) {
     };
     if (paste) row.paste = paste;
     if (note) row.note = note;
+    if (href) row.href = href;
     const band = bandFor(row.id, scoreById);
     if (band) row.band = band;
     rows.push(row);
