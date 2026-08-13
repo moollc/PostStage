@@ -1,5 +1,5 @@
 import { loadPlatforms, getPlatforms, getPlatform } from '/source/shared/platforms.js';
-import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, setLastPaste, addIdea, rememberStageWrite, undoStageWrite, mediaPersists } from '/source/shared/store.js';
+import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, setLastPaste, addIdea, rememberStageWrite, undoStageWrite, mediaPersists, setParked, visiblePosts, parkedCount } from '/source/shared/store.js';
 import { scorePostMaybeWasm } from '/source/shared/score.js';
 import { structureFor, interactionsFor, monetizeFor, effectsFor, PARTS } from '/source/shared/playbook.js';
 import { listAgents, sendAgent, readAgent, lastShopLine, shortCwd } from '/source/shared/agent-bridge.js';
@@ -1792,18 +1792,45 @@ function hasOutcomeNote(post) {
   return Boolean(post && post.outcome && String(post.outcome.note || '').trim());
 }
 
+let boardShowParked = false;
+
 function paintBoard() {
   const board = ensureBoard();
   board.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'board-head';
   const heading = document.createElement('h2');
   heading.textContent = 'Board';
-  board.appendChild(heading);
+  const parkedN = parkedCount(state);
+  const showParked = document.createElement('button');
+  showParked.type = 'button';
+  showParked.id = 'board-show-parked';
+  showParked.className = 'board-show-parked';
+  showParked.textContent = parkedN ? `Show parked (${parkedN})` : 'Show parked';
+  showParked.disabled = parkedN === 0;
+  showParked.setAttribute('aria-pressed', String(boardShowParked));
+  showParked.title = parkedN === 0
+    ? 'No parked posts'
+    : boardShowParked ? 'Hide parked posts' : 'Show parked posts';
+  if (parkedN > 0) {
+    showParked.addEventListener('click', () => {
+      boardShowParked = !boardShowParked;
+      render();
+    });
+  }
+  head.append(heading, showParked);
+  board.appendChild(head);
   const list = document.createElement('div');
   list.className = 'board-list';
-  for (const post of state.posts) {
+  // Park is overflow, not delete: parked posts drop out of the list but the
+  // active one always stays, so the canvas never shows content with no row.
+  const posts = boardShowParked ? state.posts : visiblePosts(state);
+  for (const post of posts) {
     const row = document.createElement('div');
     row.className = 'board-row' + (post.id === state.activeId ? ' active' : '');
     row.dataset.id = post.id;
+    if (post.parked === true) row.dataset.parked = '1';
+    else delete row.dataset.parked;
     const copied = hasLastPaste(post);
     const noted = hasOutcomeNote(post);
     if (copied) row.dataset.copied = '1';
@@ -1836,13 +1863,35 @@ function paintBoard() {
       mark.title = String(post.outcome.note).replace(/\s+/g, ' ').trim();
       row.appendChild(mark);
     }
-    if (post.source === 'banter') {
+    if (post.source === 'banter' || post.source === 'marketing') {
       const mark = document.createElement('span');
       mark.className = 'board-src';
-      mark.textContent = 'shop';
-      mark.title = 'From the shop inbox';
+      mark.textContent = post.source === 'marketing' ? 'marketing' : 'shop';
+      mark.title = post.source === 'marketing' ? 'From marketing' : 'From the shop inbox';
       row.appendChild(mark);
+      row.dataset.source = post.source;
     }
+    const park = document.createElement('button');
+    park.type = 'button';
+    park.className = 'board-park';
+    if (post.parked === true) park.classList.add('is-parked');
+    park.textContent = post.parked === true ? 'Unpark' : 'Park';
+    const activeRow = post.id === state.activeId;
+    park.disabled = activeRow;
+    park.title = activeRow
+      ? 'Cannot park the active post'
+      : post.parked === true
+        ? 'Return to the default board list'
+        : 'Park off the default list';
+    if (!activeRow) {
+      park.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setParked(state, post.id, !post.parked);
+        persist();
+        render();
+      });
+    }
+    row.appendChild(park);
     const st = document.createElement('button');
     st.type = 'button';
     st.className = 'board-status';
@@ -1851,6 +1900,29 @@ function paintBoard() {
     list.appendChild(row);
   }
   board.appendChild(list);
+  // Parked work must stay discoverable — a count, not a silent disappearance.
+  // Composer's park control hooks here: `#board-parked` is the affordance slot.
+  const parked = parkedCount(state);
+  if (parked) {
+    const note = document.createElement('button');
+    note.type = 'button';
+    note.id = 'board-parked';
+    note.className = 'board-parked';
+    note.dataset.count = String(parked);
+    note.textContent = `${parked} parked`;
+    note.title = 'Parked posts are hidden from this list. Nothing was deleted.';
+    note.addEventListener('click', () => {
+      // Until Composer lands a real control, clicking unparks the oldest one
+      // so parked work is never unreachable from the UI.
+      const first = state.posts.find((p) => p.parked === true);
+      if (!first) return;
+      setParked(state, first.id, false);
+      persist();
+      render();
+    });
+    board.appendChild(note);
+  }
+
   const add = document.createElement('button');
   add.type = 'button';
   add.className = 'board-new';

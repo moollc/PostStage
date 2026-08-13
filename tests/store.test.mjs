@@ -247,10 +247,12 @@ t('an unknown or malformed source falls back to studio', () => {
 
 t('source survives a save/load round trip', () => {
   const s = loadState();
-  const id = addPost(s, { source: 'banter' }).id;
+  const banterId = addPost(s, { source: 'banter' }).id;
+  const mktId = addPost(s, { source: 'marketing', title: 'Mkt mark' }).id;
   saveState(s);
   const back = loadState();
-  eq(back.posts.find((p) => p.id === id).source, 'banter', 'persisted');
+  eq(back.posts.find((p) => p.id === banterId).source, 'banter', 'banter persisted');
+  eq(back.posts.find((p) => p.id === mktId).source, 'marketing', 'marketing persisted');
 });
 
 t('a stored post with a bad source is repaired on read', () => {
@@ -1105,6 +1107,181 @@ t('quota honesty holds when the attempted save carries a large compressed image'
   ok(result === false, 'save reports failure, not success, for an over-quota compressed attach');
   eq(s.saveError, 'quota', 'saveError is set for a quota failure on media, same as any other field');
   eq(mem.get(KEY), savedRaw, 'the last good save (without the media) is untouched, not partially overwritten');
+});
+
+// --- park is not delete -----------------------------------------------
+// `parked` already exists on the post shape (`blankPost` defaults it to
+// `false`; `normalize` coerces anything but a literal `true` back to
+// `false`, so a stray truthy string can never quietly count as parked).
+// What is NOT written yet is the setter Opus is building. These are split
+// into two groups: what already exists and must not regress, and the
+// setter's contract, tested against the real export if it exists yet.
+
+t('a fresh post starts unparked', () => {
+  const p = getActive(loadState());
+  eq(p.parked, false, 'parked defaults to false');
+});
+
+t('parked only ever coerces to a literal true — a truthy string is not parked', () => {
+  const s = loadState();
+  const id = s.activeId;
+  mem.set(KEY, JSON.stringify({
+    activeId: id,
+    posts: [{ id, parked: 'yes', media: [], ideas: [] }]
+  }));
+  const back = getActive(loadState());
+  eq(back.parked, false, 'a truthy non-boolean does not count as parked — must not hide work by accident');
+});
+
+t('parked survives a save/load round trip', () => {
+  const s = loadState();
+  getActive(s).parked = true;
+  saveState(s);
+  eq(getActive(loadState()).parked, true, 'parked persists exactly');
+});
+
+t('a parked post keeps its media through normalize — park does not drop attachments', () => {
+  const s = loadState();
+  const p = getActive(s);
+  p.parked = true;
+  p.media = [{ name: 'kept.png', type: 'image/png', url: 'data:image/png;base64,xx' }];
+  saveState(s);
+  const back = getActive(loadState());
+  eq(back.parked, true, 'still parked');
+  eq(back.media.length, 1, 'media survives park — same persistableMedia rules as any other post, not zeroed');
+});
+
+t('a parked post keeps every other field — park is a flag, not a wipe', () => {
+  const s = loadState();
+  const p = getActive(s);
+  p.hook = 'do not lose this on park';
+  p.parked = true;
+  saveState(s);
+  const back = getActive(loadState());
+  eq(back.hook, 'do not lose this on park', 'hook untouched by parking');
+  eq(back.parked, true, 'parked set');
+});
+
+// --- the setter's contract (fails informatively until Opus lands it) ---
+
+const parkExportNames = ['setParked', 'parkPost', 'togglePark'];
+const parkExportName = parkExportNames.find((name) => typeof store[name] === 'function');
+
+t('a park setter exists on the public store API', () => {
+  ok(
+    Boolean(parkExportName),
+    `none of ${JSON.stringify(parkExportNames)} are exported from store.js yet — ` +
+      'Opus has not landed the setter. The tests below this one describe its required contract.'
+  );
+});
+
+if (parkExportName) {
+  const setParked = store[parkExportName];
+
+  t(`${parkExportName} sets parked without shrinking state.posts`, () => {
+    const s = loadState();
+    addPost(s, { title: 'stays in the array either way' });
+    const before = s.posts.length;
+    const id = s.activeId;
+    setParked(s, id, true);
+    eq(s.posts.length, before, 'park never removes a post from state.posts — that is what makes it not delete');
+    ok(s.posts.some((p) => p.id === id), 'the parked post is still findable by its original id');
+  });
+
+  t(`${parkExportName} does not touch media`, () => {
+    const s = loadState();
+    const p = getActive(s);
+    p.media = [{ name: 'kept.png', type: 'image/png', url: 'data:image/png;base64,xx' }];
+    setParked(s, s.activeId, true);
+    eq(getActive(s).media.length, 1, 'park does not clear or drop media as a side effect');
+  });
+
+  t(`${parkExportName} does not touch id`, () => {
+    const s = loadState();
+    const id = s.activeId;
+    setParked(s, id, true);
+    eq(getActive(s).id, id, 'id unchanged by parking');
+    ok(!/Users|GoogleDrive|(^|\/)home(\/|$)/i.test(getActive(s).id), 'id still has no home path after park');
+  });
+
+  t(`${parkExportName} survives a save/load round trip`, () => {
+    const s = loadState();
+    addPost(s, { title: 'so the active one has somewhere to go if parked' });
+    const target = s.posts[0].id;
+    setParked(s, target, true);
+    saveState(s);
+    const back = loadState();
+    eq(back.posts.find((p) => p.id === target).parked, true, 'parked state persists through the real save path, not just in memory');
+  });
+
+  // Parking the sole post would leave nothing active on the canvas. The
+  // implementation is written to refuse this case ("nowhere to go — refuse
+  // rather than blank the canvas") — but a caller has to be able to TELL
+  // that it refused. Returning the post unchanged looks identical to
+  // success unless the caller separately re-checks `.parked`, which nothing
+  // does today. This is the exact "park must not lie about what happened"
+  // case the task is about.
+  t(`${parkExportName} on the only post either parks it or visibly refuses — it must not silently no-op`, () => {
+    const s = loadState(); // exactly one post: the fresh draft, and it is active
+    eq(s.posts.length, 1, 'sanity: only one post on the board');
+    const id = s.activeId;
+    const result = setParked(s, id, true);
+    const actuallyParked = getActive(s).parked === true;
+    if (actuallyParked) return; // implementation allows parking the sole post — fine, both outcomes are legitimate
+    ok(
+      result === null || result === false,
+      'setParked did not park the sole post, but returned a truthy value — a caller reading the return value ' +
+        'cannot tell refusal from success, which is exactly the kind of quiet lie this task exists to catch. ' +
+        'Either park it, or make the refusal visible in the return value.'
+    );
+  });
+
+  t(`${parkExportName} can unpark — it is a toggle, not a one-way door`, () => {
+    const s = loadState();
+    setParked(s, s.activeId, true);
+    setParked(s, s.activeId, false);
+    eq(getActive(s).parked, false, 'unparking is possible');
+    ok(s.posts.some((p) => p.id === s.activeId), 'still present after unparking');
+  });
+
+  t(`${parkExportName} returns null for an unknown id, same convention as setOutcome/setPublished`, () => {
+    const s = loadState();
+    eq(setParked(s, 'nope-not-a-real-id', true), null, 'unknown id is a no-op, not a throw');
+  });
+}
+
+// --- visiblePosts / parkedCount — filters, never mutate state.posts -------
+
+t('visiblePosts hides a parked post that is not active', () => {
+  const s = loadState();
+  const second = addPost(s, { title: 'gets parked' }).id;
+  setActive(s, s.activeId === second ? s.posts[0].id : s.activeId);
+  const target = s.posts.find((p) => p.id === second);
+  target.parked = true;
+  const visible = store.visiblePosts(s);
+  ok(!visible.some((p) => p.id === second), 'parked, non-active post is filtered out of the visible list');
+  eq(s.posts.length, 2, 'but it is still in state.posts — visiblePosts filters a view, it does not delete');
+});
+
+t('visiblePosts still shows a parked post if it is the active one — never blank the canvas', () => {
+  const s = loadState();
+  const p = getActive(s);
+  p.parked = true;
+  const visible = store.visiblePosts(s);
+  ok(visible.some((v) => v.id === p.id), 'the active post stays visible even when parked');
+});
+
+t('parkedCount counts parked posts, excluding the active one', () => {
+  const s = loadState();
+  const a = s.activeId;
+  const b = addPost(s, { title: 'b' }).id;
+  const c = addPost(s, { title: 'c' }).id;
+  setActive(s, a);
+  s.posts.find((p) => p.id === b).parked = true;
+  s.posts.find((p) => p.id === c).parked = true;
+  eq(store.parkedCount(s), 2, 'two parked, neither is active');
+  s.posts.find((p) => p.id === a).parked = true; // active one is also (hypothetically) parked
+  eq(store.parkedCount(s), 2, 'the active post does not count toward parkedCount even if flagged parked');
 });
 
 console.log(failed ? `\n${failed} FAILED` : '\nall store tests pass');
