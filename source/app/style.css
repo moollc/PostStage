@@ -654,7 +654,8 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
   letter-spacing: 0.02em;
   margin-top: 0.22rem;
 }
-.preview .media-slot .media-linked {
+.preview .media-slot .media-linked,
+.preview .media-slot .media-stale {
   position: absolute;
   left: 0;
   right: 0;
