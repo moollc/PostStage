@@ -14,6 +14,10 @@
  * { note, recordedAt } — an operator's record of what actually happened, kept
  * deliberately separate from the heuristic score.
  *
+ * `stageUndo` is `null` or `{ hook, body, cta }` — the previous stage copy
+ * before the last Use-on-stage or rail overwrite of those fields. One slot,
+ * not a history. `rememberStageWrite` / `undoStageWrite` own it.
+ *
  * v1 stored a single `{ post, ideas }`. That is migrated on read, not dropped —
  * see `migrate()`. The v1 key is left in place so a downgrade does not lose work.
  *
@@ -51,6 +55,7 @@ function blankPost(overrides = {}) {
     source: DEFAULT_SOURCE,
     outcome: null,
     ideas: [],
+    stageUndo: null,
     ...overrides
   };
 }
@@ -109,26 +114,17 @@ function normalizeOutcome(value) {
   return { note, recordedAt: typeof at === 'string' && at ? at : null };
 }
 
+function normalizeStageUndo(value) {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    hook: typeof value.hook === 'string' ? value.hook : '',
+    body: typeof value.body === 'string' ? value.body : '',
+    cta: typeof value.cta === 'string' ? value.cta : ''
+  };
+}
+
 function blank() {
-  const post = blankPost({
-    title: 'Untitled post',
-    hook: 'Most posts fail before the second line.',
-    body: 'The first line buys a second of attention. The next lines have to pay it back with something the reader can use today.',
-    cta: 'What line would you cut first?',
-    hashtags: ['craft', 'audience'],
-    audience: 'a creator who stages a post on their laptop before they open the native app',
-    audienceHow: 'stated',
-    // blank() does not pass through normalize(), so the seed idea spells out
-    // every field a stored idea would be repaired into.
-    ideas: [
-      {
-        id: uid(),
-        text: 'What if the post starts with the cost of waiting?',
-        part: 'hook',
-        source: DEFAULT_IDEA_SOURCE
-      }
-    ]
-  });
+  const post = blankPost();
   return withViews({ activeId: post.id, posts: [post], ideaLayout: 'stack' });
 }
 
@@ -165,6 +161,16 @@ function isLegacy(data) {
  * Repair a board that parsed but is not internally consistent: missing fields,
  * an empty list, or an `activeId` pointing at a post that is gone.
  */
+function persistableMedia(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter((m) => {
+    if (!m || typeof m !== 'object') return false;
+    const url = String(m.url || '');
+    if (!url || url.startsWith('blob:')) return false;
+    return true;
+  });
+}
+
 function normalize(board) {
   const posts = board.posts
     .filter((p) => p && typeof p === 'object')
@@ -172,11 +178,13 @@ function normalize(board) {
       ...p,
       id: p.id || uid(),
       ideas: normalizeIdeas(p.ideas),
+      media: persistableMedia(p.media),
       status: p.status === 'published' ? 'published' : 'draft',
       publishedAt: p.status === 'published' ? (p.publishedAt || null) : null,
       // Boards written before source/outcome existed pick up the defaults here.
       source: normalizeSource(p.source),
-      outcome: normalizeOutcome(p.outcome)
+      outcome: normalizeOutcome(p.outcome),
+      stageUndo: normalizeStageUndo(p.stageUndo)
     }));
   if (!posts.length) posts.push(blankPost());
   const activeId = posts.some((p) => p.id === board.activeId) ? board.activeId : posts[0].id;
@@ -258,6 +266,7 @@ export function addPost(state, overrides = {}) {
   const post = blankPost(overrides);
   post.source = normalizeSource(post.source);
   post.outcome = normalizeOutcome(post.outcome);
+  post.stageUndo = normalizeStageUndo(post.stageUndo);
   state.posts.push(post);
   state.activeId = post.id;
   return post;
@@ -337,6 +346,38 @@ export function setSource(state, id, source) {
   return post;
 }
 
+/**
+ * Snapshot hook/body/cta on the active post before a stage overwrite.
+ * Pass `previous` on a rail commit so the slot is the pre-blur copy, not
+ * the live fields. One slot — a later write replaces it. Persisting is
+ * the caller's job.
+ */
+export function rememberStageWrite(state, previous) {
+  const post = getActive(state);
+  const src = previous && typeof previous === 'object' ? previous : post;
+  post.stageUndo = {
+    hook: String(src.hook ?? ''),
+    body: String(src.body ?? ''),
+    cta: String(src.cta ?? '')
+  };
+  return post.stageUndo;
+}
+
+/**
+ * Restore the last remembered hook/body/cta once, then clear the slot.
+ * Returns true when something was restored.
+ */
+export function undoStageWrite(state) {
+  const post = getActive(state);
+  const prev = normalizeStageUndo(post.stageUndo);
+  if (!prev) return false;
+  post.hook = prev.hook;
+  post.body = prev.body;
+  post.cta = prev.cta;
+  post.stageUndo = null;
+  return true;
+}
+
 export function uid() {
   return 'c' + Math.random().toString(36).slice(2, 9);
 }
@@ -344,5 +385,6 @@ export function uid() {
 export const __testing = {
   blank, blankPost, migrate, normalize, withViews, isBoard, isLegacy,
   normalizeSource, normalizeOutcome, DEFAULT_SOURCE,
-  normalizeIdeaSource, normalizeIdeas, DEFAULT_IDEA_SOURCE, KEY, LEGACY_KEY
+  normalizeIdeaSource, normalizeIdeas, DEFAULT_IDEA_SOURCE, KEY, LEGACY_KEY,
+  normalizeStageUndo
 };

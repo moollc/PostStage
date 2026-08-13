@@ -10,6 +10,8 @@
     "verify": "node scripts/verify-workspace.mjs",
     "test:store": "node tests/store.test.mjs",
     "test:score": "node tests/score-parity.test.mjs",
+    "test:export": "node tests/export.test.mjs",
+    "test:undo": "node tests/undo.test.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
   },
   "dependencies": {},

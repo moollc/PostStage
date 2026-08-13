@@ -52,14 +52,18 @@ t('blank starts with exactly one draft and it is active', () => {
   eq(s.posts[0].status, 'draft', 'status');
   eq(s.posts[0].publishedAt, null, 'publishedAt');
   eq(s.activeId, s.posts[0].id, 'activeId points at it');
-  ok(s.posts[0].ideas.length >= 1, 'starts with an idea');
+  eq(s.posts[0].ideas, [], 'no seed idea');
+  eq(s.posts[0].hook, '', 'no seed hook');
 });
 
 t('blank keeps the audience and media defaults', () => {
   const p = getActive(loadState());
-  ok(p.audience.includes('creator'), 'audience default kept');
-  eq(p.audienceHow, 'stated', 'audienceHow default kept');
+  eq(p.audience, '', 'no seed audience');
+  eq(p.audienceHow, 'unknown', 'audienceHow default kept');
   eq(p.media, [], 'media default kept');
+  eq(p.body, '', 'no seed body');
+  eq(p.cta, '', 'no seed cta');
+  eq(p.hashtags, [], 'no seed tags');
 });
 
 t('v1 state migrates into a one-post board', () => {
@@ -418,7 +422,7 @@ t('addIdea lands on the active post, not the first one', () => {
   store.addIdea(s, { text: 'belongs to the second', source: 'shop' });
   eq(second.ideas.length, 1, 'went to the active post');
   eq(second.ideas[0].text, 'belongs to the second', 'the right idea');
-  eq(s.posts.find((p) => p.id === first).ideas.at(-1).text !== 'belongs to the second', true, 'not on the first');
+  eq(s.posts.find((p) => p.id === first).ideas, [], 'not on the first');
 });
 
 t('shop ideas survive a save/load round trip', () => {
@@ -450,10 +454,78 @@ t('ideas stored without a source are read back as studio', () => {
   eq(ideas[0].text, 'pre-shop idea', 'text untouched');
 });
 
-t('the seed idea keeps its part and gains a source', () => {
-  const idea = getActive(loadState()).ideas[0];
-  eq(idea.part, 'hook', 'seed part preserved');
-  eq(idea.source, 'studio', 'seed source backfilled');
+t('blank has no seed idea', () => {
+  eq(getActive(loadState()).ideas, [], 'no seed idea');
+});
+
+t('blank starts with no stage undo', () => {
+  eq(getActive(loadState()).stageUndo, null, 'null');
+  eq(addPost(loadState()).stageUndo, null, 'addPost null');
+});
+
+t('rememberStageWrite can take a pre-commit snapshot', () => {
+  const s = loadState();
+  const p = getActive(s);
+  p.hook = 'live hook';
+  p.body = 'live body';
+  p.cta = 'live cta';
+  store.rememberStageWrite(s, { hook: 'cut hook', body: 'cut body', cta: 'cut cta' });
+  eq(p.stageUndo, { hook: 'cut hook', body: 'cut body', cta: 'cut cta' }, 'stored the passed copy');
+  eq(p.hook, 'live hook', 'live fields unchanged');
+  ok(store.undoStageWrite(s), 'restored');
+  eq(p.hook, 'cut hook', 'hook from the rail snapshot');
+  eq(p.body, 'cut body', 'body from the rail snapshot');
+  eq(p.cta, 'cut cta', 'cta from the rail snapshot');
+});
+
+t('a later remember replaces the one stack slot', () => {
+  const s = loadState();
+  const p = getActive(s);
+  p.hook = 'first';
+  store.rememberStageWrite(s);
+  p.hook = 'second';
+  store.rememberStageWrite(s);
+  eq(p.stageUndo.hook, 'second', 'last write only');
+});
+
+t('undoStageWrite restores once and clears the slot', () => {
+  const s = loadState();
+  const p = getActive(s);
+  p.hook = 'before';
+  p.body = 'kept';
+  store.rememberStageWrite(s);
+  p.hook = 'after';
+  ok(store.undoStageWrite(s), 'restored');
+  eq(p.hook, 'before', 'hook back');
+  eq(p.body, 'kept', 'body untouched by the write');
+  eq(p.stageUndo, null, 'cleared');
+  eq(store.undoStageWrite(s), false, 'second undo is a no-op');
+  eq(p.hook, 'before', 'stays restored');
+});
+
+t('stage undo survives a save/load round trip', () => {
+  const s = loadState();
+  getActive(s).hook = 'live';
+  store.rememberStageWrite(s);
+  getActive(s).hook = 'overwritten';
+  saveState(s);
+  const loaded = loadState();
+  const back = getActive(loaded);
+  eq(back.hook, 'overwritten', 'write persisted');
+  eq(back.stageUndo, { hook: 'live', body: '', cta: '' }, 'slot persisted');
+  ok(store.undoStageWrite(loaded), 'undo after load');
+  eq(getActive(loaded).hook, 'live', 'restored after load');
+  eq(getActive(loaded).stageUndo, null, 'cleared after load undo');
+});
+
+t('a malformed stored stageUndo is repaired on read', () => {
+  mem.set(KEY, JSON.stringify({ activeId: 'p1', posts: [{ id: 'p1', stageUndo: 'nope' }] }));
+  eq(getActive(loadState()).stageUndo, null, 'coerced');
+});
+
+t('a migrated v1 post gets a null stageUndo', () => {
+  mem.set(LEGACY_KEY, JSON.stringify(V1));
+  eq(getActive(loadState()).stageUndo, null, 'null');
 });
 
 t('a migrated v1 idea gains a studio source', () => {
@@ -462,6 +534,178 @@ t('a migrated v1 idea gains a studio source', () => {
   eq(idea.source, 'studio', 'source');
   eq(idea.part, 'hook', 'v1 part still preserved');
   eq(idea.text, 'an idea', 'v1 text still preserved');
+});
+
+// --- media survives persist, but never reaches the paste string -----------
+
+const { formatPost } = await import('../source/shared/export.js');
+const { getPlatform } = await import('../source/shared/platforms.js');
+
+t('a post with media still pastes text only after persist', () => {
+  const s = loadState();
+  const p = getActive(s);
+  p.hook = 'Most posts fail before the second line.';
+  p.body = 'The first line buys a second of attention.';
+  p.cta = 'What line would you cut first?';
+  p.hashtags = ['craft'];
+  // A durable data: attachment, which survives a reload. Blob urls are dropped
+  // on persist by design (they are dead after reload) — see the case below.
+  p.media = [{ name: 'private-shot.png', type: 'image/png', url: 'data:image/png;base64,iVBORw0KGgo=' }];
+  p.genPrompt = 'a still of a desk at night';
+
+  saveState(s);
+  const back = getActive(loadState());
+
+  // The attachment is still on the post — persist must not drop durable media.
+  eq(back.media.length, 1, 'media survived the round trip');
+  eq(back.media[0].name, 'private-shot.png', 'file name survived');
+  eq(back.genPrompt, 'a still of a desk at night', 'gen prompt survived');
+
+  // The file name and the encoded bytes really are in storage, so the only
+  // thing between them and a public timeline is the copy string.
+  ok(/private-shot\.png/.test(mem.get(KEY)), 'the file name really is in storage');
+
+  // ...and after reload, Copy post is still text only, on every platform.
+  for (const id of ['x', 'instagram', 'tiktok', 'youtube', 'linkedin', 'facebook']) {
+    const out = formatPost(back, getPlatform(id));
+    ok(!out.includes('private-shot.png'), `${id} pasted a file name after persist`);
+    ok(!out.includes('image/png'), `${id} pasted a mime type after persist`);
+    ok(!out.includes('data:'), `${id} pasted encoded media after persist`);
+    ok(!out.includes('iVBOR'), `${id} pasted image bytes after persist`);
+    ok(!out.includes('desk at night'), `${id} pasted the gen prompt after persist`);
+  }
+
+  // Identical to the same post with the attachment stripped.
+  const noMedia = { ...back, media: [], genPrompt: '' };
+  for (const id of ['x', 'instagram', 'youtube']) {
+    eq(
+      formatPost(back, getPlatform(id)),
+      formatPost(noMedia, getPlatform(id)),
+      `${id} copy changed because media was attached`
+    );
+  }
+});
+
+t('a blob url is dropped on persist, and the copy stays text only either way', () => {
+  const s = loadState();
+  const p = getActive(s);
+  p.hook = 'Most posts fail before the second line.';
+  p.body = '';
+  p.cta = '';
+  p.hashtags = [];
+  p.media = [{ name: 'pasted.png', type: 'image/png', url: 'blob:https://localhost:7744/9f8e-4c2a' }];
+
+  // Before persist: the blob is on the post, and copy already ignores it.
+  eq(formatPost(p, getPlatform('x')), 'Most posts fail before the second line.', 'copy ignores a live blob');
+
+  saveState(s);
+  ok(!/blob:/.test(mem.get(KEY)), 'no blob url is written to storage');
+
+  const back = getActive(loadState());
+  eq(back.media.length, 0, 'blob media is not restored');
+  eq(formatPost(back, getPlatform('x')), 'Most posts fail before the second line.', 'copy unchanged after reload');
+});
+
+// --- outcome: clears on empty, never reaches the heuristic ----------------
+
+// getPlatform is already imported above for the media/paste tests.
+const { scorePost } = await import('../source/shared/score.js');
+
+/** A post with enough copy that the score is stable and non-zero. */
+function scorable(s) {
+  const p = getActive(s);
+  p.hook = 'Most posts fail before the second line.';
+  p.body = 'The first line buys a second of attention and pays it back with something usable.';
+  p.cta = 'What line would you cut first?';
+  p.hashtags = ['craft'];
+  p.audience = 'a creator staging a post';
+  p.platform = 'x';
+  return p;
+}
+
+t('setOutcome clears on every shape of empty note', () => {
+  const s = loadState();
+  const id = s.activeId;
+  for (const empty of ['', '   ', '\t', '\n\n', null, undefined]) {
+    store.setOutcome(s, id, 'a real note');
+    ok(getActive(s).outcome, 'seeded a note first');
+    eq(store.setOutcome(s, id, empty).outcome, null, `cleared by ${JSON.stringify(empty)}`);
+    eq(getActive(s).outcome, null, 'cleared on the post too');
+  }
+});
+
+t('clearing an outcome does not disturb the rest of the post', () => {
+  const s = loadState();
+  const p = scorable(s);
+  store.setOutcome(s, s.activeId, 'flopped, 3 likes');
+  store.setOutcome(s, s.activeId, '   ');
+  eq(getActive(s).hook, p.hook, 'hook untouched');
+  eq(getActive(s).status, 'draft', 'status untouched');
+  eq(getActive(s).publishedAt, null, 'publishedAt untouched');
+  eq(getActive(s).source, 'studio', 'source untouched');
+});
+
+t('a cleared outcome stays cleared across save and load', () => {
+  const s = loadState();
+  store.setOutcome(s, s.activeId, 'went viral');
+  store.setOutcome(s, s.activeId, '');
+  saveState(s);
+  eq(getActive(loadState()).outcome, null, 'still null after reload');
+});
+
+t('setOutcome does not change the heuristic score, band or checks', () => {
+  // The record of what happened must never feed the thing that predicts it —
+  // otherwise the heuristic starts grading its own homework.
+  const s = loadState();
+  const p = scorable(s);
+  const platform = getPlatform('x');
+  const before = scorePost(p, platform);
+
+  store.setOutcome(s, s.activeId, 'flopped, 3 likes, no clicks');
+  const afterSet = scorePost(getActive(s), platform);
+  eq(afterSet.score, before.score, 'score unchanged by recording an outcome');
+  eq(afterSet.band, before.band, 'band unchanged');
+  eq(afterSet.checks, before.checks, 'every check unchanged');
+
+  store.setOutcome(s, s.activeId, '');
+  const afterClear = scorePost(getActive(s), platform);
+  eq(afterClear.score, before.score, 'score unchanged by clearing it');
+  eq(afterClear.band, before.band, 'band unchanged by clearing it');
+  eq(afterClear.checks, before.checks, 'checks unchanged by clearing it');
+});
+
+t('a glowing outcome cannot lift a thin post', () => {
+  // The direction that would matter most if the wall ever broke.
+  const s = loadState();
+  const p = getActive(s);
+  p.hook = 'Hi';
+  p.body = '';
+  p.cta = 'Click here';
+  p.hashtags = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+  p.platform = 'instagram';
+  const platform = getPlatform('instagram');
+  const before = scorePost(p, platform);
+
+  store.setOutcome(s, s.activeId, 'best performing post of the year, 40k saves');
+  const after = scorePost(getActive(s), platform);
+  eq(after.score, before.score, 'still scores the same');
+  eq(after.band, before.band, 'still the same band');
+  ok(after.band === 'thin' || after.band === 'draft', 'and still not ready');
+});
+
+t('the scorer never reads an outcome field', () => {
+  const s = loadState();
+  const p = scorable(s);
+  const platform = getPlatform('x');
+  const clean = scorePost(p, platform);
+
+  // Same copy, an outcome bolted straight onto the object the scorer receives.
+  const withOutcome = { ...p, outcome: { note: 'went viral', recordedAt: new Date().toISOString() } };
+  const scored = scorePost(withOutcome, platform);
+  eq(scored.score, clean.score, 'score identical');
+  eq(scored.checks, clean.checks, 'checks identical');
+  ok(!('outcome' in clean), 'scorePost does not echo outcome in its result');
+  ok(!clean.checks.some((c) => /outcome/i.test(c.id)), 'no outcome-derived check exists');
 });
 
 console.log(failed ? `\n${failed} FAILED` : '\nall store tests pass');
