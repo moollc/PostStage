@@ -33,6 +33,9 @@
     "test:inbox-still": "node tests/inbox-still.test.mjs",
     "test:inbox-id": "node tests/inbox-id.test.mjs",
     "test:browser-inbox-id": "node tests/browser-inbox-id.mjs",
+    "test:browser-source": "node tests/browser-source.mjs",
+    "test:park": "node tests/park.test.mjs",
+    "test:nostore": "node tests/nostore.test.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
   },
   "dependencies": {},

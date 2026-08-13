@@ -72,6 +72,7 @@ function blankPost(overrides = {}) {
     source: DEFAULT_SOURCE,
     outcome: null,
     lastPaste: null,
+    parked: false,
     ideas: [],
     stageUndo: null,
     ...overrides
@@ -272,6 +273,9 @@ function normalize(board) {
       source: normalizeSource(p.source),
       outcome: normalizeOutcome(p.outcome),
       lastPaste: normalizeLastPaste(p.lastPaste),
+      // Boards written before park existed read as unparked. Anything other
+      // than a literal true is not parked — a truthy string must not hide work.
+      parked: p.parked === true,
       stageUndo: normalizeStageUndo(p.stageUndo)
     }));
   if (!posts.length) posts.push(blankPost());
@@ -475,6 +479,55 @@ export function setSource(state, id, source) {
   if (!post) return null;
   post.source = normalizeSource(source);
   return post;
+}
+
+/**
+ * Park or unpark a post. Parking hides it from the default board list; it is
+ * **not** a delete — the post, its ideas, its paste and its note all stay.
+ *
+ * Parking the active post moves the board to the nearest unparked neighbour
+ * first, so the canvas never goes blank underneath the operator. If there is no
+ * neighbour to move to, the park is **refused**: a board cannot park itself
+ * into showing nothing.
+ *
+ * Return values are three-way on purpose, because "it worked" and "I declined"
+ * must not look the same to a caller:
+ *
+ *   - the post   — parked or unparked as asked
+ *   - `false`    — refused; this is the last unparked post and it stays visible
+ *   - `null`     — unknown id, same convention as `setOutcome` / `setPublished`
+ */
+export function setParked(state, id, parked) {
+  const post = state.posts.find((p) => p.id === id);
+  if (!post) return null;
+  const next = parked === true;
+
+  if (next && state.activeId === id) {
+    const other = state.posts.find((p) => p.id !== id && p.parked !== true);
+    // Nowhere to go. Refuse, and say so — returning the post here would read
+    // as success to anyone checking the return value.
+    if (!other) return false;
+    state.activeId = other.id;
+  }
+
+  post.parked = next;
+  return post;
+}
+
+/**
+ * Posts the board should show: everything unparked, plus the active post even
+ * if it is parked. The second half is what keeps a parked-then-selected post
+ * from being invisible while its content fills the stage.
+ */
+export function visiblePosts(state) {
+  if (!state || !Array.isArray(state.posts)) return [];
+  return state.posts.filter((p) => p && (p.parked !== true || p.id === state.activeId));
+}
+
+/** How many posts are parked and therefore out of the default list. */
+export function parkedCount(state) {
+  if (!state || !Array.isArray(state.posts)) return 0;
+  return state.posts.filter((p) => p && p.parked === true && p.id !== state.activeId).length;
 }
 
 /**
