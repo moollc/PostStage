@@ -284,7 +284,8 @@ function paintStructure(partsEl) {
 function applyIdeaToStage(idea) {
   const text = String(idea.text || '').trim();
   if (!text) return false;
-  const part = idea.part || 'hook';
+  const part = idea.part;
+  if (!part) return false;
   const post = state.post;
   if (part === 'hook') post.hook = text;
   else if (part === 'body') post.body = text;
@@ -300,7 +301,7 @@ function ideaCard(idea) {
   const el = document.createElement('article');
   const blank = !String(idea.text || '').trim();
   if (idea.part == null) idea.part = '';
-  el.className = 'card idea' + (blank ? ' empty' : '') + (selected === idea.id ? ' selected' : '');
+  el.className = 'card idea' + (blank ? ' empty' : '') + (!idea.part ? ' needs-part' : '') + (selected === idea.id ? ' selected' : '');
   el.dataset.id = idea.id;
   const head = document.createElement('div');
   head.className = 'idea-head';
@@ -336,6 +337,13 @@ function ideaCard(idea) {
     mark.title = 'From the shop pane';
     label.appendChild(mark);
   }
+  if (!idea.part) {
+    const hint = document.createElement('span');
+    hint.className = 'idea-part-hint';
+    hint.textContent = 'part';
+    hint.title = 'Pick which part of the post this claims';
+    label.appendChild(hint);
+  }
   head.append(label, sel);
   el.appendChild(head);
   const ta = document.createElement('textarea');
@@ -348,6 +356,12 @@ function ideaCard(idea) {
   use.disabled = blank;
   use.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (!idea.part) {
+      use.textContent = 'Pick a part';
+      clearTimeout(use._flash);
+      use._flash = setTimeout(() => { use.textContent = 'Use on stage'; }, 2000);
+      return;
+    }
     if (!applyIdeaToStage(idea)) return;
     persist();
     render();
