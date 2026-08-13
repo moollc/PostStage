@@ -1,8 +1,8 @@
 import { loadPlatforms, getPlatforms, getPlatform } from '/source/shared/platforms.js';
-import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome } from '/source/shared/store.js';
+import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, addIdea } from '/source/shared/store.js';
 import { scorePostMaybeWasm } from '/source/shared/score.js';
 import { structureFor, interactionsFor, monetizeFor, effectsFor, PARTS } from '/source/shared/playbook.js';
-import { listAgents, sendAgent, shortCwd } from '/source/shared/agent-bridge.js';
+import { listAgents, sendAgent, readAgent, lastShopLine, shortCwd } from '/source/shared/agent-bridge.js';
 import { formatPost } from '/source/shared/export.js';
 import { formatStageBrief } from '/source/shared/brief.js';
 
@@ -326,7 +326,17 @@ function ideaCard(idea) {
     persist();
     paintStructure(rail.querySelector('#parts'));
   });
-  head.append(h3, sel);
+  const label = document.createElement('div');
+  label.className = 'idea-label';
+  label.appendChild(h3);
+  if (idea.source === 'shop') {
+    const mark = document.createElement('span');
+    mark.className = 'idea-src';
+    mark.textContent = 'SHOP';
+    mark.title = 'From the shop pane';
+    label.appendChild(mark);
+  }
+  head.append(label, sel);
   el.appendChild(head);
   const ta = document.createElement('textarea');
   ta.value = idea.text;
@@ -632,6 +642,7 @@ async function renderRail() {
     <div class="agent-actions">
       <button type="button" id="agent-send">Send to first idle</button>
       <button type="button" id="agent-ask">Ask shop</button>
+      <button type="button" id="agent-keep">Keep shop line</button>
     </div>
   `;
 
@@ -751,12 +762,14 @@ async function loadAgentDock() {
   const box = document.getElementById('agents');
   const sendBtn = document.getElementById('agent-send');
   const askBtn = document.getElementById('agent-ask');
+  const keepBtn = document.getElementById('agent-keep');
   if (!box) return;
 
   const disable = (why) => {
     box.innerHTML = `<p class="hint">${escapeHtml(why)}</p>`;
     if (sendBtn) sendBtn.disabled = true;
     if (askBtn) askBtn.disabled = true;
+    if (keepBtn) keepBtn.disabled = true;
   };
 
   let herdr = true;
@@ -841,6 +854,43 @@ async function loadAgentDock() {
         flashAsk('Ask failed');
       } finally {
         askBtn.disabled = false;
+      }
+    };
+  }
+
+  const flashKeep = (label) => {
+    if (!keepBtn) return;
+    keepBtn.textContent = label;
+    clearTimeout(flashKeep.t);
+    flashKeep.t = setTimeout(() => { keepBtn.textContent = 'Keep shop line'; }, 2000);
+  };
+
+  if (keepBtn) {
+    keepBtn.disabled = false;
+    keepBtn.textContent = 'Keep shop line';
+    keepBtn.onclick = async () => {
+      if (!selected) {
+        flashKeep('No pane selected');
+        return;
+      }
+      keepBtn.disabled = true;
+      try {
+        const data = await readAgent(selected);
+        const line = lastShopLine(data && data.text);
+        if (!line) {
+          flashKeep('No shop line');
+          return;
+        }
+        if (!addIdea(state, { text: line, source: 'shop' })) {
+          flashKeep('No shop line');
+          return;
+        }
+        persist();
+        render();
+      } catch {
+        flashKeep('Keep failed');
+      } finally {
+        keepBtn.disabled = false;
       }
     };
   }

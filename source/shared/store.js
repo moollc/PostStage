@@ -7,6 +7,9 @@
  *
  * `ideaLayout` is `'stack' | 'free'` (default `'stack'`). Board-level, not per post.
  *
+ * Ideas are `{ id, text, part, source }` where idea `source` is 'studio' | 'shop'
+ * — a narrower vocabulary than the post-level one below. Use `addIdea`.
+ *
  * `source` is 'studio' | 'banter' | 'marketing'. `outcome` is null or
  * { note, recordedAt } — an operator's record of what actually happened, kept
  * deliberately separate from the heuristic score.
@@ -58,6 +61,37 @@ function normalizeSource(value) {
 }
 
 /**
+ * Where an idea came from. Deliberately a *different, narrower* vocabulary from
+ * the post-level `SOURCES` above: an idea is either something the operator
+ * wrote in the studio or something that came off the shop floor. Post sources
+ * like 'banter' are not valid here, so the two must never share a normalizer.
+ */
+export const IDEA_SOURCES = ['studio', 'shop'];
+const DEFAULT_IDEA_SOURCE = 'studio';
+
+/** Missing or unknown idea source → `'studio'`. */
+function normalizeIdeaSource(value) {
+  return IDEA_SOURCES.includes(value) ? value : DEFAULT_IDEA_SOURCE;
+}
+
+/**
+ * Repair a stored idea list. Ideas written before `source` existed pick up
+ * `'studio'` here, the same way posts backfill their own fields.
+ */
+function normalizeIdeas(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((i) => i && typeof i === 'object')
+    .map((i) => ({
+      ...i,
+      id: i.id || uid(),
+      text: typeof i.text === 'string' ? i.text : '',
+      part: typeof i.part === 'string' ? i.part : '',
+      source: normalizeIdeaSource(i.source)
+    }));
+}
+
+/**
  * An outcome is `null` or `{ note, recordedAt }`. A bare string is accepted and
  * wrapped, since that is the shape a caller is most likely to reach for. An
  * empty or whitespace-only note clears the outcome back to `null`.
@@ -84,8 +118,15 @@ function blank() {
     hashtags: ['craft', 'audience'],
     audience: 'a creator who stages a post on their laptop before they open the native app',
     audienceHow: 'stated',
+    // blank() does not pass through normalize(), so the seed idea spells out
+    // every field a stored idea would be repaired into.
     ideas: [
-      { id: uid(), text: 'What if the post starts with the cost of waiting?', part: 'hook' }
+      {
+        id: uid(),
+        text: 'What if the post starts with the cost of waiting?',
+        part: 'hook',
+        source: DEFAULT_IDEA_SOURCE
+      }
     ]
   });
   return withViews({ activeId: post.id, posts: [post], ideaLayout: 'stack' });
@@ -130,7 +171,7 @@ function normalize(board) {
     .map((p) => blankPost({
       ...p,
       id: p.id || uid(),
-      ideas: Array.isArray(p.ideas) ? p.ideas : [],
+      ideas: normalizeIdeas(p.ideas),
       status: p.status === 'published' ? 'published' : 'draft',
       publishedAt: p.status === 'published' ? (p.publishedAt || null) : null,
       // Boards written before source/outcome existed pick up the defaults here.
@@ -223,6 +264,29 @@ export function addPost(state, overrides = {}) {
 }
 
 /**
+ * Append an idea to the **active** post and return it.
+ *
+ * `text` is trimmed; an empty or whitespace-only text returns `null` and appends
+ * nothing, so a stray call cannot litter the lane with blanks. `part` is an
+ * optional string. `source` is `'studio'` or `'shop'` — anything else coerces to
+ * `'studio'`, which is how a shop line lands: `addIdea(state, { text, source: 'shop' })`.
+ *
+ * Persisting is the caller's job, same as `addPost`.
+ */
+export function addIdea(state, fields = {}) {
+  const text = String(fields.text ?? '').trim();
+  if (!text) return null;
+  const idea = {
+    id: fields.id || uid(),
+    text,
+    part: typeof fields.part === 'string' ? fields.part : '',
+    source: normalizeIdeaSource(fields.source)
+  };
+  getActive(state).ideas.push(idea);
+  return idea;
+}
+
+/**
  * Mark a post published or back to draft. Publishing stamps `publishedAt` if it
  * is not already set; returning to draft clears it. Returns the post, or null
  * when the id is unknown.
@@ -279,5 +343,6 @@ export function uid() {
 
 export const __testing = {
   blank, blankPost, migrate, normalize, withViews, isBoard, isLegacy,
-  normalizeSource, normalizeOutcome, DEFAULT_SOURCE, KEY, LEGACY_KEY
+  normalizeSource, normalizeOutcome, DEFAULT_SOURCE,
+  normalizeIdeaSource, normalizeIdeas, DEFAULT_IDEA_SOURCE, KEY, LEGACY_KEY
 };

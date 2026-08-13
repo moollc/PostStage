@@ -306,6 +306,23 @@ async function handleRequest(req, res) {
     return json(res, 200, { ok: true, herdr: true, agents: normalizeAgents(parsed) });
   }
 
+  if (url.pathname === '/api/agents/read' && req.method === 'GET') {
+    const target = (url.searchParams.get('target') || '').trim();
+    if (!target) return json(res, 400, { error: 'target_required' });
+    if (!herdrAvailable()) return json(res, 503, { error: 'herdr_missing', herdr: false });
+    const r = runHerdr(['agent', 'read', target, '--source', 'recent-unwrapped', '--lines', '80']);
+    if (!r.ok) {
+      if (r.missing) return json(res, 503, { error: 'herdr_missing', herdr: false });
+      return json(res, 502, { error: 'read_failed' });
+    }
+    let parsed;
+    try { parsed = JSON.parse(r.stdout); } catch {
+      return json(res, 502, { error: 'herdr_parse' });
+    }
+    const text = String(parsed?.result?.read?.text ?? parsed?.result?.text ?? parsed?.text ?? '').trim().slice(0, 4000);
+    return json(res, 200, { ok: true, target, text });
+  }
+
   if (url.pathname === '/api/agents/send' && req.method === 'POST') {
     let payload;
     try { payload = JSON.parse(await readBody(req)); } catch {
