@@ -58,7 +58,48 @@ export async function readAgent(target) {
 
 const SHOP_SKIP = /^[\s│─┌┐└┘├┤┬┴┼╭╮╯╰═─\-+|]+$/;
 
-/** Last usable line from a shop read — skips prompts, box art, and noise. */
+/**
+ * Lines a shop read must never hand back.
+ *
+ * `lastShopLine` reads a Herdr pane, and a pane is full of things that are not
+ * post copy: a `cd`, an ENOENT, an export of a key. Keep puts whatever comes
+ * back onto the idea lane, where it persists and can reach the stage — so a
+ * leak here is a leak into saved work and, via Ask shop, back out again.
+ *
+ * The rule is **skip the line, do not sanitize it**. Redacting would hand the
+ * operator a mangled half-line that reads like an idea; skipping falls through
+ * to the next usable line, which is what they meant to keep. `brief.js` scrubs
+ * because it must still send the surrounding sentence; here there is nothing
+ * to preserve.
+ */
+const SHOP_UNSAFE = [
+  // Home directories and cloud-synced roots, POSIX and Windows.
+  /\/Users\//i,
+  /(^|\/)home\/[^/\s]+/i,
+  /[A-Za-z]:\\Users\\/i,
+  /GoogleDrive|OneDrive|Dropbox|iCloud/i,
+  // A bare absolute path or a file:// url, whatever it points at.
+  /(^|\s)(~|\.{0,2})\/[^\s]{6,}/,
+  /file:\/\//i,
+  // An address is someone's identity even when it is the operator's own.
+  /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/,
+  // Keys, tokens and secrets — named, or shaped like the common prefixes.
+  /\b(api[_-]?key|secret|token|password|passwd|bearer|authorization)\b/i,
+  // Vendor key prefixes. The tail may itself contain `-`/`_` separators
+  // (`sk-live-abc…`, `xoxb-123-abc…`), so match the whole run, not one segment.
+  /\b(sk|pk|ghp|gho|ghu|ghs|xox[abps])[-_][A-Za-z0-9][A-Za-z0-9_-]{7,}/
+];
+
+/** True when a pane line carries something that must not be kept. */
+export function isUnsafeShopLine(line) {
+  const s = String(line || '');
+  return SHOP_UNSAFE.some((re) => re.test(s));
+}
+
+/**
+ * Last usable line from a shop read — skips prompts, box art, noise, and
+ * anything carrying a path, an address, or a secret.
+ */
 export function lastShopLine(text) {
   const lines = String(text || '').split('\n');
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -66,6 +107,7 @@ export function lastShopLine(text) {
     if (!line || line.length < 12) continue;
     if (line.startsWith('❯')) continue;
     if (SHOP_SKIP.test(line)) continue;
+    if (isUnsafeShopLine(line)) continue;
     return line;
   }
   return '';
