@@ -1,5 +1,5 @@
 import { loadPlatforms, getPlatforms, getPlatform } from '/source/shared/platforms.js';
-import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, setLastPaste, setPublishedUrl, addIdea, rememberStageWrite, undoStageWrite, mediaPersists, setParked, visiblePosts, parkedCount } from '/source/shared/store.js';
+import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, setLastPaste, setPublishedUrl, setGuestScan, addIdea, rememberStageWrite, undoStageWrite, mediaPersists, setParked, visiblePosts, parkedCount } from '/source/shared/store.js';
 import { scorePostMaybeWasm } from '/source/shared/score.js';
 import { structureFor, interactionsFor, monetizeFor, effectsFor, PARTS } from '/source/shared/playbook.js';
 import { listAgents, sendAgent, readAgent, lastShopLine, shortCwd } from '/source/shared/agent-bridge.js';
@@ -41,6 +41,11 @@ const videoDurationByPost = new Map();
 const X_MIN_VIDEO_SEC = 10;
 /** Whether the live launcher handles `/image?path=`. null until probed. */
 let imageRouteLive = null;
+/** Post id whose last guest scan failed this sitting — snapshot is not cleared. */
+let guestScanFailId = null;
+let guestScanBusy = false;
+let guestScanFocusAt = 0;
+let guestScanSeq = 0;
 
 /**
  * Save, then patch the one honest error line in place — no full render, so a
@@ -727,6 +732,93 @@ function bindPublishedUrlField(el, post) {
     el.value = getActive(state).publishedUrl || '';
     persist();
     scheduleJudgement();
+    paintGuestScan();
+    if (getActive(state).publishedUrl) runGuestScan(getActive(state));
+  });
+}
+
+function guestScanWhen(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 16).replace('T', ' ');
+}
+
+function paintGuestScan() {
+  const hint = document.getElementById('guest-scan-hint');
+  const btn = document.getElementById('btn-guest-scan');
+  const post = getActive(state);
+  const url = post && post.publishedUrl;
+  if (btn) {
+    btn.hidden = !url;
+    btn.disabled = !url || guestScanBusy;
+  }
+  if (!hint) return;
+  if (!url) {
+    hint.hidden = true;
+    hint.textContent = '';
+    return;
+  }
+  hint.hidden = false;
+  const snap = post.guestScan;
+  const failed = guestScanFailId === post.id;
+  if (failed) {
+    hint.textContent = snap && (snap.title || snap.text)
+      ? 'Scan failed — last snapshot kept'
+      : 'Scan failed';
+    return;
+  }
+  if (snap && (snap.title || snap.text)) {
+    const when = guestScanWhen(snap.at);
+    hint.textContent = [snap.title, when].filter(Boolean).join(' · ');
+    return;
+  }
+  hint.textContent = '';
+}
+
+async function runGuestScan(post) {
+  if (!post || !post.publishedUrl) return;
+  const seq = ++guestScanSeq;
+  guestScanBusy = true;
+  paintGuestScan();
+  try {
+    const res = await fetch('/api/guest-scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: post.publishedUrl })
+    });
+    if (seq !== guestScanSeq) return;
+    const type = String(res.headers.get('content-type') || '');
+    let data = null;
+    if (/json/i.test(type)) {
+      try { data = await res.json(); } catch { data = null; }
+    }
+    if (!res.ok || !/json/i.test(type) || !data || data.ok !== true) {
+      guestScanFailId = post.id;
+      paintGuestScan();
+      return;
+    }
+    setGuestScan(state, post.id, { at: data.at, title: data.title, text: data.text });
+    guestScanFailId = null;
+    persist();
+    paintGuestScan();
+  } catch {
+    if (seq !== guestScanSeq) return;
+    guestScanFailId = post.id;
+    paintGuestScan();
+  } finally {
+    if (seq === guestScanSeq) {
+      guestScanBusy = false;
+      paintGuestScan();
+    }
+  }
+}
+
+function bindGuestScan(btn) {
+  if (!btn || btn.dataset.guestScanBound) return;
+  btn.dataset.guestScanBound = '1';
+  btn.addEventListener('click', () => {
+    runGuestScan(getActive(state));
   });
 }
 
@@ -1311,6 +1403,8 @@ async function renderRail() {
       </div>
       <label class="hint published-url-label" for="f-published-url">Live URL</label>
       <input id="f-published-url" type="url" class="published-url-rail" value="${escapeHtml(post.publishedUrl || '')}" placeholder="https://x.com/…/status/…" aria-label="Published URL">
+      <button type="button" id="btn-guest-scan"${post.publishedUrl ? '' : ' hidden'}>Scan</button>
+      <p id="guest-scan-hint" class="hint guest-scan-hint" hidden></p>
     </div>
 
     <h2>Structure · what each part does</h2>
@@ -1374,6 +1468,8 @@ async function renderRail() {
   const outcomeInput = rail.querySelector('#f-outcome');
   if (outcomeInput) bindOutcomeField(outcomeInput, post);
   bindPublishedUrlField(rail.querySelector('#f-published-url'), post);
+  bindGuestScan(rail.querySelector('#btn-guest-scan'));
+  paintGuestScan();
   paintOutcomePrompt();
   paintSaveError();
   bindCopyOut(document.getElementById('btn-copy-out'));
@@ -2249,6 +2345,14 @@ window.addEventListener('keydown', (e) => {
   if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
   e.preventDefault();
   addBlankIdea();
+});
+window.addEventListener('focus', () => {
+  const post = getActive(state);
+  if (!post || !post.publishedUrl) return;
+  const now = Date.now();
+  if (now - guestScanFocusAt < 20000) return;
+  guestScanFocusAt = now;
+  runGuestScan(post);
 });
 window.addEventListener('blur', () => {
   spaceDown = false;

@@ -209,12 +209,14 @@ t('park never touches outcome, paste, status, source or publishedUrl', () => {
   post.publishedAt = '2026-08-13T00:00:00.000Z';
   post.source = 'banter';
   post.publishedUrl = 'https://x.com/Jayson_X/status/2087952991638716610';
+  post.guestScan = { at: '2026-08-13T20:00:00.000Z', title: 'W1', text: 'boxxy' };
   setParked(s, b, true);
   const after = s.posts.find((p) => p.id === b);
   eq(after.status, 'published', 'status');
   eq(after.publishedAt, '2026-08-13T00:00:00.000Z', 'publishedAt');
   eq(after.source, 'banter', 'source');
   eq(after.publishedUrl, 'https://x.com/Jayson_X/status/2087952991638716610', 'publishedUrl');
+  eq(after.guestScan.title, 'W1', 'guestScan');
 });
 
 console.log(failed ? `\n${failed} FAILED` : '\nall park tests pass');

@@ -18,6 +18,9 @@
  * href (host + status id; query stripped). It is not a view count and it is
  * not the local `status: 'published'` toggle.
  *
+ * `guestScan` is `null` or `{ at, title, text }` — a guest GET of that URL.
+ * Identity only. Fail keeps the last snapshot. Never views or likes.
+ *
  * `lastPaste` is `null` or `{ text, platformId, partIndex, at, stage? }` — the exact
  * string that last landed on the clipboard. Written only on successful Copy.
  * `stage` is hook/body/cta/hashtags at that Copy, for formatThread of the snapshot.
@@ -48,6 +51,7 @@
 
 import { isSafeRelPath, mediaSrcForPath } from './media-link.js';
 import { normalizePublishedUrl } from './published-url.js';
+import { normalizeGuestScan } from './guest-scan.js';
 
 const KEY = 'poststage.v2';
 const LEGACY_KEY = 'poststage.v1';
@@ -75,6 +79,7 @@ function blankPost(overrides = {}) {
     status: 'draft',
     publishedAt: null,
     publishedUrl: null,
+    guestScan: null,
     source: DEFAULT_SOURCE,
     outcome: null,
     lastPaste: null,
@@ -189,6 +194,7 @@ function migrate(v1) {
     status: 'draft',
     publishedAt: null,
     publishedUrl: null,
+    guestScan: null,
     // v1 predates both fields; a migrated post is studio work with no outcome yet.
     source: normalizeSource(post.source),
     outcome: normalizeOutcome(post.outcome)
@@ -277,6 +283,7 @@ function normalize(board) {
       status: p.status === 'published' ? 'published' : 'draft',
       publishedAt: p.status === 'published' ? (p.publishedAt || null) : null,
       publishedUrl: normalizePublishedUrl(p.publishedUrl),
+      guestScan: normalizeGuestScan(p.guestScan),
       // Boards written before source/outcome existed pick up the defaults here.
       source: normalizeSource(p.source),
       outcome: normalizeOutcome(p.outcome),
@@ -391,6 +398,7 @@ export function addPost(state, overrides = {}) {
   post.lastPaste = normalizeLastPaste(post.lastPaste);
   post.stageUndo = normalizeStageUndo(post.stageUndo);
   post.publishedUrl = normalizePublishedUrl(post.publishedUrl);
+  post.guestScan = normalizeGuestScan(post.guestScan);
   state.posts.push(post);
   state.activeId = post.id;
   return post;
@@ -490,7 +498,22 @@ export function setOutcome(state, id, note) {
 export function setPublishedUrl(state, id, raw) {
   const post = state.posts.find((p) => p.id === id);
   if (!post) return null;
-  post.publishedUrl = normalizePublishedUrl(raw);
+  const next = normalizePublishedUrl(raw);
+  if (next !== post.publishedUrl) post.guestScan = null;
+  post.publishedUrl = next;
+  return post;
+}
+
+/**
+ * Record a successful guest scan. Identity only — `{ at, title, text }`.
+ * Passing junk or empty does **not** clear a previous snapshot (fail keeps
+ * last). Returns the post, or null when the id is unknown.
+ */
+export function setGuestScan(state, id, raw) {
+  const post = state.posts.find((p) => p.id === id);
+  if (!post) return null;
+  const next = normalizeGuestScan(raw);
+  if (next) post.guestScan = next;
   return post;
 }
 
