@@ -4,6 +4,7 @@ import { scorePostMaybeWasm } from '/source/shared/score.js';
 import { structureFor, interactionsFor, monetizeFor, effectsFor, PARTS } from '/source/shared/playbook.js';
 import { listAgents, sendAgent, shortCwd } from '/source/shared/agent-bridge.js';
 import { formatPost } from '/source/shared/export.js';
+import { formatStageBrief } from '/source/shared/brief.js';
 
 const canvas = document.getElementById('canvas');
 const wrap = canvas.parentElement;
@@ -526,7 +527,10 @@ async function renderRail() {
     <h2>Local agents</h2>
     <div class="agents" id="agents"><p class="hint">Reading Herdr…</p></div>
     <textarea id="agent-msg" placeholder="Message the selected agent"></textarea>
-    <button type="button" id="agent-send">Send to first idle</button>
+    <div class="agent-actions">
+      <button type="button" id="agent-send">Send to first idle</button>
+      <button type="button" id="agent-ask">Ask shop</button>
+    </div>
   `;
 
   const partsEl = rail.querySelector('#parts');
@@ -644,11 +648,13 @@ function paintPasteView() {
 async function loadAgentDock() {
   const box = document.getElementById('agents');
   const sendBtn = document.getElementById('agent-send');
+  const askBtn = document.getElementById('agent-ask');
   if (!box) return;
 
   const disable = (why) => {
     box.innerHTML = `<p class="hint">${escapeHtml(why)}</p>`;
     if (sendBtn) sendBtn.disabled = true;
+    if (askBtn) askBtn.disabled = true;
   };
 
   let herdr = true;
@@ -686,6 +692,13 @@ async function loadAgentDock() {
   };
   paint();
 
+  const flashAsk = (label) => {
+    if (!askBtn) return;
+    askBtn.textContent = label;
+    clearTimeout(flashAsk.t);
+    flashAsk.t = setTimeout(() => { askBtn.textContent = 'Ask shop'; }, 2000);
+  };
+
   if (sendBtn) {
     sendBtn.disabled = false;
     sendBtn.textContent = 'Send to selected agent';
@@ -701,6 +714,31 @@ async function loadAgentDock() {
         box.insertAdjacentHTML('beforeend', `<p class="hint">${escapeHtml(err.message)}</p>`);
       } finally {
         sendBtn.disabled = false;
+      }
+    };
+  }
+
+  if (askBtn) {
+    askBtn.disabled = false;
+    askBtn.textContent = 'Ask shop';
+    askBtn.onclick = async () => {
+      if (!selected) {
+        flashAsk('No pane selected');
+        return;
+      }
+      askBtn.disabled = true;
+      try {
+        const post = getActive(state);
+        const platform = getPlatform(post.platform);
+        const scored = await scorePostMaybeWasm(post);
+        const parts = structureFor(post);
+        const brief = formatStageBrief(post, platform, scored, parts);
+        await sendAgent(selected, brief);
+        flashAsk('Sent to shop');
+      } catch {
+        flashAsk('Ask failed');
+      } finally {
+        askBtn.disabled = false;
       }
     };
   }
