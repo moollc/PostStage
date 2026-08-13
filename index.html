@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0e1014">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/source/assets/images/icon.svg">
+  <link rel="apple-touch-icon" href="/source/assets/images/icon.svg">
+  <title>PostStage</title>
+  <!-- modulepreload:build-web -->
+  <link rel="stylesheet" href="/source/app/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <h1>PostStage</h1>
+    </div>
+    <nav class="plats" id="plats" aria-label="Platform preview"></nav>
+    <div class="top-actions">
+      <button type="button" id="btn-idea">New idea</button>
+      <button type="button" id="btn-export">Copy post</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="canvas-wrap" aria-label="Ideation canvas">
+      <div class="canvas" id="canvas"></div>
+    </section>
+    <aside class="rail" id="rail" aria-label="Post inspector"></aside>
+  </main>
+
+  <script type="module" src="/source/app/index.js"></script>
+  <script type="module">
+    import { context } from '/source/shared/permissions.js';
+    if (context.secure && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "poststage",
+  "version": "0.1.0",
+  "description": "Local canvas to ideate, preview and judge social posts",
+  "type": "module",
+  "scripts": {
+    "start": "node build/scripts/launcher.js",
+    "dev": "node build/scripts/launcher.js --dev",
+    "build": "node build/scripts/build-web.js",
+    "verify": "node scripts/verify-workspace.mjs",
+    "test:store": "node tests/store.test.mjs",
+    "score": "cargo build --release --manifest-path build/score/Cargo.toml"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "playwright": "^1.52.0"
+  }
+}
