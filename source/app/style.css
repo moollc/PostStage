@@ -83,7 +83,6 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 }
 .board-src { padding: 0 0.2rem 0 0; }
 .card.idea .idea-part-hint { text-transform: lowercase; opacity: 0.92; }
-.card.idea.needs-part .idea-part { border-color: var(--amber); color: var(--amber); }
 .card.idea.needs-part:not(.empty) { box-shadow: 0 0 0 1px #e8a54b33; }
 .board-new { flex: none; font-size: 0.75rem; }
 .stage-status { margin: 0.2rem 0 0.35rem; font-size: 0.72rem; }
@@ -148,7 +147,18 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 .card.idea h3 { font-size: 0.66rem; letter-spacing: 0.16em; color: #6e6a64; margin: 0; }
 .card.idea .idea-head { display: flex; align-items: center; justify-content: space-between; gap: 0.4rem; margin-bottom: 0.35rem; }
 .card.idea .idea-label { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
-.card.idea .idea-part { width: auto; max-width: 7.5rem; font-size: 0.72rem; padding: 0.18rem 0.3rem; }
+.card.idea .idea-part {
+  width: auto; max-width: 7.5rem; min-width: 4.25rem; flex-shrink: 0;
+  font-size: 0.72rem; padding: 0.18rem 0.3rem;
+  background: #12151b; color: var(--ink);
+}
+.card.idea.needs-part .idea-part {
+  border-color: var(--amber); color: var(--amber); background: #15120e;
+}
+.card.idea.needs-part .idea-part:focus {
+  color: var(--ink); background: #12151b;
+  border-color: var(--amber); box-shadow: 0 0 0 2px #e8a54b55; outline: none;
+}
 .card.idea textarea {
   min-height: 4.6rem; font-size: 1.04rem; line-height: 1.42; font-weight: 450;
   background: transparent; border-color: transparent; padding: 0.12rem 0 0.4rem;
