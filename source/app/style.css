@@ -55,7 +55,11 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 .stage-actions.copy-with-chrome { align-items: center; }
 .stage-actions.copy-with-chrome .stage-copy { flex: 1; }
 .agent-copy-wrap { min-width: 0; }
-.agent-copy-wrap #agent-copy { width: 100%; }
+.agent-copy-wrap #agent-copy {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
 #btn-export.copied, #agent-copy.copied, .stage-copy.copied { border-color: var(--ok); color: var(--ok); }
 #btn-export.failed, #agent-copy.failed, .stage-copy.failed { border-color: var(--bad); color: var(--bad); }
 #btn-export.warn, #agent-copy.warn, .stage-copy.warn { border-color: var(--amber); color: var(--amber); }
@@ -151,17 +155,63 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 .card.idea.needs-part:not(.empty) { box-shadow: 0 0 0 1px #e8a54b33; }
 .board-new { flex: none; font-size: 0.75rem; }
 .stage-status { margin: 0.2rem 0 0.35rem; font-size: 0.72rem; }
-.outcome-prompt {
+.outcome-block {
   margin: 0.35rem 0 0.55rem;
+  min-width: 0;
 }
 .outcome-prompt[hidden] { display: none; }
-#thread-bar:not([hidden])[data-final="0"] + #outcome-prompt:not([hidden]) {
+#thread-bar:not([hidden])[data-final="0"] + .outcome-block #outcome-prompt:not([hidden]):has(.outcome-rail:placeholder-shown) {
   display: none;
+}
+.outcome-block:not(:has(#last-paste-chip:not(:empty))):has(#outcome-prompt[hidden]) {
+  margin: 0;
+}
+/* Reload: persisted lastPaste + outcome value stay visible (beat [hidden] / paint) */
+.outcome-block #outcome-prompt:has(.outcome-rail:not(:placeholder-shown)) {
+  display: block !important;
+}
+/* No lastPaste: empty chip is the signal — hide paste chrome and outcome field */
+.outcome-block:not(:has(#last-paste-chip:not(:empty))) #last-paste-chip,
+.outcome-block:not(:has(#last-paste-chip:not(:empty))) #outcome-prompt,
+.outcome-block:not(:has(#last-paste-chip:not(:empty))) #f-outcome,
+.outcome-block:not(:has(#last-paste-chip:not(:empty))) .outcome-prompt-label {
+  display: none !important;
 }
 .outcome-prompt-label {
   display: block;
   margin: 0 0 0.28rem;
   font-size: 0.72rem;
+}
+.outcome-prompt-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0 0 0.28rem;
+  min-width: 0;
+}
+.outcome-prompt-head .outcome-prompt-label {
+  display: block;
+  margin: 0;
+  flex: none;
+}
+.last-paste {
+  font-size: 0.62rem;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  color: var(--muted);
+  padding: 0.1rem 0.32rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #12151b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+.last-paste:empty { display: none; }
+#last-paste-chip:not(:empty) {
+  display: block !important;
 }
 .outcome-rail {
   width: 100%;
@@ -337,7 +387,19 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
   overflow: hidden;
   position: relative;
 }
-.preview .media-placeholder { padding: 0.5rem; }
+/* Empty — one readable hint (placeholder or no media element) */
+.preview .media-slot:not(:has(.media-img[src]:not([src=""]), .media-vid[src]:not([src=""]))),
+.preview .media-slot:has(.media-placeholder) {
+  border: 1px dashed #3a3d44;
+  background: #0a0c10;
+}
+.preview .media-placeholder {
+  padding: 0.5rem;
+  text-align: center;
+  line-height: 1.35;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
 .preview .media-placeholder .media-session {
   display: block;
   font-size: 0.66rem;
@@ -368,6 +430,8 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
   display: block;
   min-height: 0;
   cursor: default;
+  border: none;
+  background: #080a0e;
 }
 .preview .media-slot.droppable:has(.media-placeholder) {
   border: 1px dashed #3a3d44;
@@ -378,10 +442,41 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
   outline-offset: -2px;
   background: #12151b;
 }
-.preview .media-placeholder {
+/* Dead session — hide broken media, same readable hint family as empty */
+.preview .media-slot.dead-session::after,
+.preview .media-slot:has(.media-img.media-dead, .media-vid.media-dead)::after,
+.preview .media-slot:has(.media-img:broken, .media-vid:broken)::after {
+  content: "Session ended — click or drop again";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
   padding: 0.5rem;
   text-align: center;
   line-height: 1.35;
+  font-size: 0.72rem;
+  color: var(--muted);
+  z-index: 2;
+  pointer-events: none;
+}
+.preview .media-slot.dead-session,
+.preview .media-slot:has(.media-img.media-dead, .media-vid.media-dead),
+.preview .media-slot:has(.media-img:broken, .media-vid:broken) {
+  display: grid;
+  place-items: center;
+  border: 1px dashed #3a3d44;
+  background: #0a0c10;
+}
+.preview .media-slot.dead-session .media-img,
+.preview .media-slot.dead-session .media-vid,
+.preview .media-slot:has(.media-img.media-dead) .media-img,
+.preview .media-slot:has(.media-vid.media-dead) .media-vid,
+.preview .media-img.media-dead,
+.preview .media-vid.media-dead,
+.preview .media-img:broken,
+.preview .media-vid:broken,
+.preview .media-img:-moz-broken {
+  display: none !important;
 }
 .preview .media-img,
 .preview .media-vid {
@@ -760,20 +855,25 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 }
 .thread-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.35rem 0.4rem;
   margin-top: 0.35rem;
+  min-width: 0;
 }
 .thread-bar[hidden] { display: none; }
 #thread-pos {
   font-size: 0.78rem;
   color: var(--muted);
   letter-spacing: 0.02em;
+  flex: 0 0 auto;
 }
 #thread-prev,
 #thread-next {
   font-size: 0.75rem;
   padding: 0.32rem 0.55rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 #thread-prev:disabled,
 #thread-next:disabled {
@@ -782,6 +882,14 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 }
 #thread-prev:disabled:hover,
 #thread-next:disabled:hover { border-color: var(--line); }
+#thread-bar:not([hidden]) + .outcome-block .outcome-prompt-head {
+  flex-wrap: wrap;
+  gap: 0.28rem 0.35rem;
+}
+#thread-bar:not([hidden]) + .outcome-block #last-paste-chip:not(:empty) {
+  flex: 1 1 100%;
+  width: 100%;
+}
 .engine-hint {
   color: var(--ink);
   font-size: 0.82rem;

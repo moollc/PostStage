@@ -330,6 +330,7 @@ t('a migrated v1 post gets studio source and null outcome', () => {
   const p = getActive(loadState());
   eq(p.source, 'studio', 'source');
   eq(p.outcome, null, 'outcome');
+  eq(p.lastPaste, null, 'lastPaste');
   eq(p.hook, 'Old hook', 'v1 fields still survive');
 });
 
@@ -341,6 +342,7 @@ t('a v2 board saved before these fields existed gains them', () => {
   const p = getActive(loadState());
   eq(p.source, 'studio', 'source backfilled');
   eq(p.outcome, null, 'outcome backfilled');
+  eq(p.lastPaste, null, 'lastPaste backfilled');
   eq(p.status, 'published', 'existing fields untouched');
   eq(p.publishedAt, '2026-01-01T00:00:00.000Z', 'stamp untouched');
 });
@@ -461,6 +463,111 @@ t('blank has no seed idea', () => {
 t('blank starts with no stage undo', () => {
   eq(getActive(loadState()).stageUndo, null, 'null');
   eq(addPost(loadState()).stageUndo, null, 'addPost null');
+});
+
+t('blank starts with no lastPaste', () => {
+  eq(getActive(loadState()).lastPaste, null, 'null');
+  eq(addPost(loadState()).lastPaste, null, 'addPost null');
+});
+
+t('setLastPaste stores the exact clipboard string and stamps at', () => {
+  const s = loadState();
+  const pasted = 'HOOK\n\nbody 1/2';
+  const p = store.setLastPaste(s, s.activeId, {
+    text: pasted,
+    platformId: 'x',
+    partIndex: 0
+  });
+  eq(p.lastPaste.text, pasted, 'exact text');
+  eq(p.lastPaste.platformId, 'x', 'platform');
+  eq(p.lastPaste.partIndex, 0, 'part');
+  ok(p.lastPaste.at, 'at stamped');
+  ok(!Number.isNaN(Date.parse(p.lastPaste.at)), 'at is a real date');
+});
+
+t('a later Copy replaces lastPaste and does not touch outcome', () => {
+  const s = loadState();
+  const id = s.activeId;
+  store.setLastPaste(s, id, { text: 'first paste', platformId: 'x', partIndex: 0 });
+  store.setOutcome(s, id, 'saw 3 replies');
+  const stamp = getActive(s).outcome.recordedAt;
+  store.setLastPaste(s, id, { text: 'second paste', platformId: 'instagram', partIndex: 2 });
+  const p = getActive(s);
+  eq(p.lastPaste.text, 'second paste', 'replaced');
+  eq(p.lastPaste.platformId, 'instagram', 'platform replaced');
+  eq(p.lastPaste.partIndex, 2, 'index replaced');
+  eq(p.outcome.note, 'saw 3 replies', 'outcome note kept');
+  eq(p.outcome.recordedAt, stamp, 'outcome stamp kept');
+});
+
+t('rail-like field edits and save/load do not rewrite lastPaste', () => {
+  const s = loadState();
+  const pasted = 'exact clipboard string';
+  store.setLastPaste(s, s.activeId, { text: pasted, platformId: 'x', partIndex: 1 });
+  const snap = { ...getActive(s).lastPaste };
+  const p = getActive(s);
+  p.hook = 'edited hook after paste';
+  p.body = 'edited body';
+  p.cta = 'edited cta';
+  store.rememberStageWrite(s, { hook: 'old', body: 'old', cta: 'old' });
+  saveState(s);
+  const back = getActive(loadState());
+  eq(back.lastPaste, snap, 'lastPaste unchanged after rail edit persist');
+  eq(back.hook, 'edited hook after paste', 'live copy did change');
+});
+
+t('undo last write does not rewrite lastPaste', () => {
+  const s = loadState();
+  store.setLastPaste(s, s.activeId, { text: 'pasted', platformId: 'x', partIndex: 0 });
+  const snap = { ...getActive(s).lastPaste };
+  const p = getActive(s);
+  p.hook = 'before';
+  store.rememberStageWrite(s);
+  p.hook = 'after';
+  store.undoStageWrite(s);
+  eq(getActive(s).lastPaste, snap, 'lastPaste still the clipboard snapshot');
+  eq(getActive(s).hook, 'before', 'hook restored');
+});
+
+t('setOutcome does not rewrite lastPaste, and clearing it does not either', () => {
+  const s = loadState();
+  store.setLastPaste(s, s.activeId, { text: 'pasted', platformId: 'linkedin', partIndex: 0 });
+  const snap = { ...getActive(s).lastPaste };
+  store.setOutcome(s, s.activeId, 'quiet');
+  eq(getActive(s).lastPaste, snap, 'kept after setOutcome');
+  store.setOutcome(s, s.activeId, '');
+  eq(getActive(s).lastPaste, snap, 'kept after clear');
+  eq(getActive(s).outcome, null, 'outcome cleared');
+});
+
+t('lastPaste survives a save/load round trip', () => {
+  const s = loadState();
+  store.setLastPaste(s, s.activeId, { text: 'thread part 2/2', platformId: 'x', partIndex: 1 });
+  const snap = { ...getActive(s).lastPaste };
+  saveState(s);
+  eq(getActive(loadState()).lastPaste, snap, 'persisted');
+});
+
+t('a malformed stored lastPaste is repaired on read', () => {
+  mem.set(KEY, JSON.stringify({
+    activeId: 'p1',
+    posts: [
+      { id: 'p1', lastPaste: 'bare' },
+      { id: 'p2', lastPaste: { text: '' } },
+      { id: 'p3', lastPaste: { text: 'kept', platformId: 'x', partIndex: 3, at: 42 } },
+      { id: 'p4', lastPaste: 99 }
+    ]
+  }));
+  const s = loadState();
+  const by = (id) => s.posts.find((p) => p.id === id);
+  eq(by('p1').lastPaste, null, 'bare string dropped');
+  eq(by('p2').lastPaste, null, 'empty text dropped');
+  eq(by('p3').lastPaste, { text: 'kept', platformId: 'x', partIndex: 3, at: null }, 'bad at dropped, rest kept');
+  eq(by('p4').lastPaste, null, 'nonsense dropped');
+});
+
+t('setLastPaste returns null for an unknown id', () => {
+  eq(store.setLastPaste(loadState(), 'nope', { text: 'x', platformId: 'x', partIndex: 0 }), null, 'null');
 });
 
 t('rememberStageWrite can take a pre-commit snapshot', () => {
@@ -706,6 +813,19 @@ t('the scorer never reads an outcome field', () => {
   eq(scored.checks, clean.checks, 'checks identical');
   ok(!('outcome' in clean), 'scorePost does not echo outcome in its result');
   ok(!clean.checks.some((c) => /outcome/i.test(c.id)), 'no outcome-derived check exists');
+});
+
+t('the scorer never reads lastPaste', () => {
+  const s = loadState();
+  const p = scorable(s);
+  const platform = getPlatform('x');
+  const clean = scorePost(p, platform);
+  store.setLastPaste(s, s.activeId, { text: 'viral paste 1/1', platformId: 'x', partIndex: 0 });
+  const after = scorePost(getActive(s), platform);
+  eq(after.score, clean.score, 'score identical');
+  eq(after.checks, clean.checks, 'checks identical');
+  ok(!('lastPaste' in clean), 'scorePost does not echo lastPaste');
+  ok(!clean.checks.some((c) => /paste|reach|impress/i.test(c.id + c.note)), 'no paste metrics in checks');
 });
 
 console.log(failed ? `\n${failed} FAILED` : '\nall store tests pass');

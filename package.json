@@ -12,6 +12,12 @@
     "test:score": "node tests/score-parity.test.mjs",
     "test:export": "node tests/export.test.mjs",
     "test:undo": "node tests/undo.test.mjs",
+    "test:paste": "node tests/paste-snapshot.test.mjs",
+    "test:browser": "node tests/browser-copy-outcome.mjs",
+    "test:browser-thread": "node tests/browser-thread-outcome.mjs",
+    "test:browser-reload": "node tests/browser-outcome-reload.mjs",
+    "test:browser-posts": "node tests/browser-post-isolation.mjs",
+    "test:browser-media": "node tests/browser-media-reload.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
   },
   "dependencies": {},
