@@ -768,6 +768,56 @@ t('save keeps a video link as path+href, not a blob or data:video', () => {
   eq(back.media[0].href, '/image?path=tests%2Ftiny-x.webm', 'reload href');
 });
 
+t('a compressed still data URL persists; blob, data:video, and home paths do not', () => {
+  eq(store.mediaPersists({
+    type: 'image/jpeg',
+    url: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD'
+  }), true, 'jpeg data URL stays');
+  eq(store.mediaPersists({
+    type: 'image/webp',
+    url: 'data:image/webp;base64,UklGRg=='
+  }), true, 'webp data URL stays');
+  eq(store.mediaPersists({
+    type: 'image/jpeg',
+    url: 'blob:http://127.0.0.1:7744/fat'
+  }), false, 'blob still dropped');
+  eq(store.mediaPersists({
+    type: 'video/mp4',
+    url: 'data:video/mp4;base64,xx'
+  }), false, 'no data:video');
+  eq(store.mediaPersists({
+    type: 'image/jpeg',
+    path: '/Users/me/shot.jpg',
+    url: 'data:image/jpeg;base64,xx'
+  }), false, 'no home path');
+
+  const s = loadState();
+  const p = getActive(s);
+  p.media = [{
+    name: 'fat.jpg',
+    type: 'image/jpeg',
+    url: 'data:image/jpeg;base64,/9j/4AAQ',
+    session: false
+  }];
+  saveState(s);
+  const raw = JSON.parse(mem.get(KEY));
+  const stored = ((raw.posts || [])[0] || {}).media || [];
+  eq(stored.length, 1, 'compressed still kept');
+  ok(/^data:image\/jpeg/i.test(stored[0].url), 'stored as data:image/jpeg');
+  ok(!/blob:/i.test(JSON.stringify(stored)), 'no blob');
+  ok(!/data:video/i.test(JSON.stringify(stored)), 'no data:video');
+  ok(!/Users|GoogleDrive|(^|\/)home(\/|$)/i.test(JSON.stringify(stored)), 'no home path');
+  const back = getActive(loadState());
+  eq(back.media[0].url.slice(0, 22), 'data:image/jpeg;base64', 'reload still is data:image');
+});
+
+t('compress-still budget matches the historic 900KB gate', async () => {
+  const { IMAGE_PERSIST_BUDGET, compressStill } = await import('../source/shared/compress-still.js');
+  eq(IMAGE_PERSIST_BUDGET, 900000, 'budget');
+  const out = await compressStill({ type: 'video/mp4', name: 'clip.mp4', size: 2000000 });
+  eq(out, null, 'video is not compressed');
+});
+
 // --- outcome: clears on empty, never reaches the heuristic ----------------
 
 // getPlatform is already imported above for the media/paste tests.
@@ -963,6 +1013,98 @@ t('saveError clears on the next successful save after a quota failure', () => {
   throwOnSet = null;
   saveState(s);
   eq(s.saveError, null, 'cleared after the next real save succeeds');
+});
+
+// --- compress-on-attach safety -----------------------------------------
+// Compress-on-attach is High's work in `index.js` (canvas/browser-API
+// compression is not runnable in this Node suite). What IS testable here,
+// and what must hold regardless of how compress is implemented: whatever
+// media object compress hands to `saveState` has to clear the exact same
+// gates as every other attachment. These pin the contract compress must
+// satisfy, using representative shapes a compressor could plausibly
+// produce — they run today and will fail if a real implementation lands
+// something that violates any of them.
+
+t('a compressed image result (data:image/, still under budget) persists', () => {
+  const compressed = {
+    name: 'photo.jpg',
+    type: 'image/jpeg',
+    url: 'data:image/jpeg;base64,' + 'x'.repeat(200),
+    session: false
+  };
+  eq(store.mediaPersists(compressed), true, 'compressed data:image/ still persists like any small image');
+  const s = loadState();
+  getActive(s).media = [compressed];
+  saveState(s);
+  const back = getActive(loadState());
+  eq(back.media[0].url, compressed.url, 'the compressed data URL round-trips exactly');
+});
+
+t('a compressed result must not be a video data URL', () => {
+  // Compression is an image-size operation; it must never relabel or persist
+  // a clip as data:video, even if a compressor mistakenly tried to.
+  const bad = { name: 'clip.webm', type: 'video/webm', url: 'data:video/webm;base64,' + 'x'.repeat(200) };
+  eq(store.mediaPersists(bad), false, 'data:video is rejected regardless of who produced it');
+});
+
+t('a compressed result must not carry a home path, even via a written-back link', () => {
+  const bad = {
+    name: 'photo.jpg',
+    type: 'image/jpeg',
+    path: '/Users/someone/Library/compressed/photo.jpg',
+    url: '/image?path=' + encodeURIComponent('/Users/someone/Library/compressed/photo.jpg')
+  };
+  eq(store.mediaPersists(bad), false, 'a compressed file written back to an absolute home path is still rejected');
+});
+
+t('a compressed result linked via a project-relative path (like video) persists', () => {
+  // If compress ever writes large stills to disk instead of inlining a data
+  // URL, it should use the same /image?path= scheme video already proved safe.
+  const linked = {
+    name: 'photo.jpg',
+    type: 'image/jpeg',
+    path: 'tests/tiny-compressed.jpg',
+    href: '/image?path=tests%2Ftiny-compressed.jpg'
+  };
+  eq(store.mediaPersists(linked), true, 'a safe project-relative compressed link persists');
+});
+
+t('if compression fails and falls back to a session blob, the blob still does not persist', () => {
+  const fallback = {
+    name: 'photo.jpg',
+    type: 'image/jpeg',
+    url: 'blob:http://127.0.0.1:7744/compress-failed',
+    session: true
+  };
+  eq(store.mediaPersists(fallback), false, 'a blob fallback is dropped at persist time same as any other blob');
+  const s = loadState();
+  getActive(s).media = [fallback];
+  saveState(s);
+  ok(!/blob:/.test(mem.get(KEY)), 'no blob url is ever written to storage, whatever produced it');
+  eq(getActive(loadState()).media.length, 0, 'the failed-compress attachment does not survive reload');
+});
+
+t('quota honesty holds when the attempted save carries a large compressed image', () => {
+  // Same guarantee as the plain quota tests, re-proven with a payload shaped
+  // like what a (still large after compression) image attach would produce —
+  // the Lead brief calls this out by name, so it gets its own test rather
+  // than relying on the generic quota tests to imply it.
+  const s = loadState();
+  getActive(s).hook = 'kept before the failed attach';
+  saveState(s);
+  const savedRaw = mem.get(KEY);
+
+  getActive(s).media = [{
+    name: 'big.jpg',
+    type: 'image/jpeg',
+    url: 'data:image/jpeg;base64,' + 'x'.repeat(50000)
+  }];
+  throwOnSet = quotaException();
+  const result = saveState(s);
+
+  ok(result === false, 'save reports failure, not success, for an over-quota compressed attach');
+  eq(s.saveError, 'quota', 'saveError is set for a quota failure on media, same as any other field');
+  eq(mem.get(KEY), savedRaw, 'the last good save (without the media) is untouched, not partially overwritten');
 });
 
 console.log(failed ? `\n${failed} FAILED` : '\nall store tests pass');

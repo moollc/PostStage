@@ -1,7 +1,7 @@
 /**
  * Browser path: large / session-only media must not look durable.
- * A file persistableMedia will drop (blob, over the small-image data-URL
- * budget) shows "This picture leaves when you refresh." A small data-URL
+ * A file persistableMedia will drop (blob, or a still compress cannot decode)
+ * shows "This picture leaves when you refresh." A small data-URL
  * image stays quiet. Run: npm run test:browser-media-session
  *
  * Attaches to http://127.0.0.1:7744 if that origin answers. Does not start a
@@ -21,8 +21,8 @@ const TINY_PNG = Buffer.from(
   'base64'
 );
 
-/** Just over the 900000-byte data-URL budget — attach stores this as a blob. */
-const BIG_PNG = Buffer.concat([TINY_PNG, Buffer.alloc(900001 - TINY_PNG.length, 0)]);
+/** Bytes over the persist budget that are not a real image — compress cannot decode, so attach stays session-only. */
+const BIG_FAKE = Buffer.alloc(900001, 7);
 
 function originAnswers(url) {
   return new Promise((resolve) => {
@@ -99,7 +99,7 @@ try {
     fail(`small image slot said ${JSON.stringify(slotTiny)}`);
   }
 
-  await attachPng(page, 'big.png', BIG_PNG);
+  await attachPng(page, 'big.png', BIG_FAKE);
 
   const leavesBig = page.locator('.stage-card .preview .media-leaves');
   await leavesBig.waitFor({ state: 'visible', timeout: 8000 });
