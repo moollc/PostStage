@@ -11,6 +11,7 @@ import { compressStill, IMAGE_PERSIST_BUDGET } from '/source/shared/compress-sti
 import { inboxIdFromItem } from '/source/shared/inbox-id.js';
 import { normalizePublishedUrl, W1_POST_ID, W1_PUBLISHED_URL } from '/source/shared/published-url.js';
 import { copyLiveText, canCopyLive } from '/source/shared/copy-live-url.js';
+import { GUEST_SCAN_PROBE, STALE_SCAN_HINT, guestScanRouteFromHealth, guestScanRouteFromProbe } from '/source/shared/scan-stale.js';
 
 const canvas = document.getElementById('canvas');
 const wrap = canvas.parentElement;
@@ -42,6 +43,7 @@ const videoDurationByPost = new Map();
 const X_MIN_VIDEO_SEC = 10;
 /** Whether the live launcher handles `/image?path=`. null until probed. */
 let imageRouteLive = null;
+let guestScanRouteLive = null;
 /** Post id whose last guest scan failed this sitting — snapshot is not cleared. */
 let guestScanFailId = null;
 let guestScanBusy = false;
@@ -296,6 +298,32 @@ function mediaLinkedNote(m) {
     return `<span class="media-session media-stale">${escapeHtml(STALE_IMAGE_HINT)}</span>`;
   }
   return `<span class="media-session media-linked">${MEDIA_LINKED_CLIP}</span>`;
+}
+
+async function probeGuestScanRoute() {
+  try {
+    const h = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
+    if (h.ok) {
+      const data = await h.json();
+      if (guestScanRouteFromHealth(data)) {
+        guestScanRouteLive = true;
+        return;
+      }
+    }
+  } catch { /* probe the route */ }
+  try {
+    const r = await fetch('/api/guest-scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: GUEST_SCAN_PROBE }),
+      signal: AbortSignal.timeout(2000)
+    });
+    guestScanRouteLive = guestScanRouteFromProbe(r.status, {
+      'content-type': r.headers.get('content-type') || ''
+    });
+  } catch {
+    guestScanRouteLive = false;
+  }
 }
 
 async function probeImageRoute() {
@@ -786,17 +814,23 @@ function paintGuestScan() {
   const btn = document.getElementById('btn-guest-scan');
   const post = getActive(state);
   const url = post && post.publishedUrl;
+  const stale = guestScanRouteLive === false;
   if (btn) {
     btn.hidden = !url;
-    btn.disabled = !url || guestScanBusy;
+    btn.disabled = !url || guestScanBusy || stale;
   }
   if (!hint) return;
+  hint.classList.toggle('guest-scan-stale', Boolean(url && stale));
   if (!url) {
     hint.hidden = true;
     hint.textContent = '';
     return;
   }
   hint.hidden = false;
+  if (stale) {
+    hint.textContent = STALE_SCAN_HINT;
+    return;
+  }
   const snap = post.guestScan;
   const failed = guestScanFailId === post.id;
   if (failed) {
@@ -815,6 +849,10 @@ function paintGuestScan() {
 
 async function runGuestScan(post) {
   if (!post || !post.publishedUrl) return;
+  if (guestScanRouteLive === false) {
+    paintGuestScan();
+    return;
+  }
   const seq = ++guestScanSeq;
   guestScanBusy = true;
   paintGuestScan();
@@ -826,6 +864,11 @@ async function runGuestScan(post) {
     });
     if (seq !== guestScanSeq) return;
     const type = String(res.headers.get('content-type') || '');
+    if (/html/i.test(type) && !/json/i.test(type)) {
+      guestScanRouteLive = false;
+      paintGuestScan();
+      return;
+    }
     let data = null;
     if (/json/i.test(type)) {
       try { data = await res.json(); } catch { data = null; }
@@ -1442,9 +1485,9 @@ async function renderRail() {
       <div class="published-url-row">
         <input id="f-published-url" type="url" class="published-url-rail" value="${escapeHtml(post.publishedUrl || '')}" placeholder="https://x.com/…/status/…" aria-label="Published URL">
         <button type="button" id="btn-copy-link" class="copy-link-btn"${canCopyLive(post.publishedUrl) ? '' : ' disabled'} aria-label="Copy live URL to clipboard">Copy link</button>
-        <button type="button" id="btn-guest-scan"${post.publishedUrl ? '' : ' hidden'}>Scan</button>
+        <button type="button" id="btn-guest-scan"${post.publishedUrl ? '' : ' hidden'}${guestScanRouteLive === false ? ' disabled' : ''}>Scan</button>
       </div>
-      <p id="guest-scan-hint" class="hint guest-scan-hint" hidden></p>
+      <p id="guest-scan-hint" class="hint guest-scan-hint${guestScanRouteLive === false && post.publishedUrl ? ' guest-scan-stale' : ''}" hidden></p>
     </div>
 
     <h2>Structure · what each part does</h2>
@@ -2284,6 +2327,7 @@ bindLiveCopy(document.getElementById('btn-export'));
 
 await loadPlatforms();
 await probeImageRoute();
+await probeGuestScanRoute();
 applyView();
 render();
 pullInbox();
@@ -2391,6 +2435,7 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('focus', () => {
   const post = getActive(state);
   if (!post || !post.publishedUrl) return;
+  if (guestScanRouteLive === false) return;
   const now = Date.now();
   if (now - guestScanFocusAt < 20000) return;
   guestScanFocusAt = now;

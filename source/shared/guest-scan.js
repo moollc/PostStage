@@ -38,8 +38,49 @@ function collapse(s) {
 }
 
 /**
+ * A page that is serving "this post is gone" rather than the post.
+ *
+ * X answers a deleted or suspended status with **HTTP 200 and an error page**,
+ * so `res.ok` is true and the og: tags parse cleanly. Without this check the
+ * scan would happily record "Post not found" as the post's title and overwrite
+ * a good snapshot of what the operator actually published — replacing a real
+ * record with a screenshot of a door.
+ *
+ * Matched on the parsed title/description only, never on body scraping, and
+ * anchored so a real post *about* a deleted post is not caught by accident.
+ */
+// `['’]?` throughout: X renders a curly apostrophe in "doesn’t", and a straight
+// one appears in cached or proxied copies. Matching only one shape would let
+// the other through, which is exactly the case this guard exists for.
+const DEAD_PAGE = [
+  /^(this )?post (is )?(not available|unavailable|not found)/i,
+  /^(this )?(tweet|page) (is )?(not available|unavailable|not found)/i,
+  /^(sorry, ?)?(that page|this page|this account) ?(doesn['’]?t exist|does not exist|is gone)/i,
+  /^account suspended/i,
+  /^(hmm[.…]*\s*)?this page (doesn['’]?t exist|does not exist)/i,
+  /^(log in|sign up) (to |on )?x/i,
+  /^something went wrong/i,
+  /^(page )?not found$/i
+];
+
+/** True when a parsed title or description reads as a dead-post page. */
+export function isDeadGuestPage(parsed) {
+  if (!parsed || typeof parsed !== 'object') return false;
+  const title = collapse(parsed.title);
+  const text = collapse(parsed.text);
+  // A dead page has no post text to show; a live post whose *title* happens to
+  // start this way still has a description, so require both to be unhelpful.
+  const titleDead = DEAD_PAGE.some((re) => re.test(title));
+  if (!titleDead) return false;
+  return !text || DEAD_PAGE.some((re) => re.test(text));
+}
+
+/**
  * Pull og/twitter title + description from public HTML.
  * Ignores interaction counts and json-ld statistics on purpose.
+ *
+ * Returns `null` for a dead-post page, so a caller keeps its last snapshot
+ * rather than storing the error page as the post.
  */
 export function parseGuestHtml(html) {
   if (typeof html !== 'string' || !html) return null;
@@ -48,10 +89,11 @@ export function parseGuestHtml(html) {
     metaContent(html, 'og:description') || metaContent(html, 'twitter:description')
   );
   if (!title && !text) return null;
-  return {
+  const parsed = {
     title: title.slice(0, TITLE_MAX),
     text: text.slice(0, TEXT_MAX)
   };
+  return isDeadGuestPage(parsed) ? null : parsed;
 }
 
 /**

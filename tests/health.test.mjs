@@ -68,6 +68,7 @@ t('healthPayload booleans stay wrapped; started is boot ISO, not a path', () => 
   ok(/herdr:\s*herdrAvailable\(\)/.test(body), 'herdr is the availability probe');
   ok(/rust:\s*Boolean\(/.test(body), 'rust is wrapped in Boolean()');
   ok(/imageRoute:\s*true/.test(body), 'imageRoute is a literal true');
+  ok(/guestScanRoute:\s*true/.test(body), 'guestScanRoute is a literal true');
   ok(/started:\s*STARTED_AT/.test(body), 'started is the boot ISO');
   ok(!/rust:\s*scoreBin\(\)/.test(body), 'scoreBin sent unwrapped');
 });

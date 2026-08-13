@@ -46,6 +46,46 @@ ok(imageRouteFromProbe(206, { 'accept-ranges': 'bytes' }), '206 is live');
 ok(imageRouteFromProbe(404, {}), '404 dummy is live (handler ran)');
 ok(!imageRouteFromProbe(200, { 'content-type': 'text/html; charset=utf-8' }), '200 HTML is dead static fallback');
 
+// --- the /image probe never reads the response body -----------------------
+// probeImageRoute has two branches: an /api/health check (reads clean JSON,
+// already covered by tests/health.test.mjs and browser-health-safety.mjs —
+// fine to read) and the actual /image?path=__poststage_probe__ fetch, which
+// classifies liveness from status + headers only via imageRouteFromProbe.
+// A 404 there IS real HTML (build/404.html), but nothing has ever called
+// .text()/.json() on THAT response to get that far. Source-inspect just the
+// second branch so a later "let's also grab the error body for debugging"
+// change cannot silently reintroduce a path where that HTML gets read, let
+// alone stored — without also flagging the unrelated, already-safe
+// /api/health read in the first branch as a false positive.
+{
+  const { readFileSync } = await import('fs');
+  const { fileURLToPath } = await import('url');
+  const { dirname, resolve } = await import('path');
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(resolve(here, '../source/app/index.js'), 'utf8');
+  const fnStart = src.indexOf('async function probeImageRoute(');
+  ok(fnStart >= 0, 'probeImageRoute exists in index.js');
+  if (fnStart >= 0) {
+    let depth = 0;
+    let fnEnd = fnStart;
+    for (let i = src.indexOf('{', fnStart); i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}') {
+        depth--;
+        if (!depth) { fnEnd = i + 1; break; }
+      }
+    }
+    const fnBody = src.slice(fnStart, fnEnd);
+    // The second branch is the block starting at IMAGE_ROUTE_PROBE's use —
+    // isolate it from the /api/health branch above it.
+    const probeStart = fnBody.indexOf('IMAGE_ROUTE_PROBE');
+    ok(probeStart >= 0, 'the /image probe branch uses IMAGE_ROUTE_PROBE');
+    const probeBranch = fnBody.slice(probeStart);
+    ok(!/\.text\(\)|\.json\(\)|\.blob\(\)|\.arrayBuffer\(\)/.test(probeBranch), 'the /image probe branch does not read the response body — status and headers only');
+    ok(!/guestScan|setGuestScan/i.test(fnBody), 'the image-route probe has nothing to do with guest-scan storage — different feature, different code path');
+  }
+}
+
 if (failed) {
   console.log(failed + ' failed');
   process.exit(1);

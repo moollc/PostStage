@@ -81,6 +81,9 @@ try {
   if ('imageRoute' in json && typeof json.imageRoute !== 'boolean') {
     fail(`"imageRoute" is present but not a boolean: ${JSON.stringify(json.imageRoute)}`);
   }
+  if ('guestScanRoute' in json && typeof json.guestScanRoute !== 'boolean') {
+    fail(`"guestScanRoute" is present but not a boolean: ${JSON.stringify(json.guestScanRoute)}`);
+  }
   if ('started' in json) {
     if (typeof json.started !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(json.started)) {
       fail(`"started" is not an ISO timestamp: ${JSON.stringify(json.started)}`);

@@ -43,6 +43,8 @@
     "test:browser-guest-scan": "node tests/browser-guest-scan.mjs",
     "test:guest-scan": "node tests/guest-scan.test.mjs",
     "test:scan-url": "node tests/scan-url.test.mjs",
+    "test:scan-stale": "node tests/scan-stale.test.mjs",
+    "test:browser-scan-stale": "node tests/browser-scan-stale.mjs",
     "test:copy-live-url": "node tests/copy-live-url.test.mjs",
     "test:copy-live": "node tests/copy-live.test.mjs",
     "test:browser-copy-live": "node tests/browser-copy-live.mjs",

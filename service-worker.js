@@ -13,6 +13,7 @@ const ASSETS = [
   '/source/shared/published-url.js',
   '/source/shared/copy-live-url.js',
   '/source/shared/guest-scan.js',
+  '/source/shared/scan-stale.js',
   '/source/shared/score.js',
   '/source/shared/playbook.js',
   '/source/shared/platforms.js',
