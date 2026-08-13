@@ -64,6 +64,9 @@ input[type="text"] { width: 100%; padding: 0.4rem 0.5rem; }
 #btn-export.failed, #agent-copy.failed, .stage-copy.failed { border-color: var(--bad); color: var(--bad); }
 #btn-export.warn, #agent-copy.warn, .stage-copy.warn { border-color: var(--amber); color: var(--amber); }
 #btn-export.primary { font-weight: 600; }
+#btn-copy-out { font-size: 0.78rem; }
+#btn-copy-out:disabled { opacity: 0.45; cursor: default; }
+#btn-copy-out:disabled:hover { border-color: var(--line); }
 
 .stage-actions { display: flex; gap: 0.35rem; margin-top: 0.45rem; }
 .stage-copy {
@@ -275,6 +278,49 @@ body:has(#f-outcome:placeholder-shown) .board-row.active .board-noted {
 #last-paste-chip[data-platform="youtube"]::before { content: "YouTube"; }
 #last-paste-chip[data-platform="linkedin"]::before { content: "LinkedIn"; }
 #last-paste-chip[data-platform="facebook"]::before { content: "Facebook"; }
+/* Copy-out: quiet Save paste beside last-paste chip */
+#btn-copy-out {
+  font-size: 0.62rem;
+  line-height: 1.25;
+  letter-spacing: 0.03em;
+  color: var(--ink);
+  padding: 0.1rem 0.32rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #12151b;
+  flex: none;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 1;
+}
+#btn-copy-out:hover:not(:disabled) {
+  border-color: var(--muted);
+  color: var(--ink);
+}
+#btn-copy-out:disabled,
+.outcome-block:not(:has(#last-paste-chip[data-platform], #last-paste-chip:not(:empty))) #btn-copy-out {
+  cursor: not-allowed;
+  color: var(--muted);
+  border-color: #353840;
+  opacity: 1;
+}
+#btn-copy-out:disabled:hover,
+.outcome-block:not(:has(#last-paste-chip[data-platform], #last-paste-chip:not(:empty))) #btn-copy-out:hover {
+  border-color: #353840;
+  color: var(--muted);
+}
+#btn-copy-out.saved {
+  border-color: var(--ok);
+  color: var(--ok);
+  opacity: 1;
+}
+.outcome-prompt-head:has(#btn-copy-out) #last-paste-chip[data-platform],
+.outcome-prompt-head:has(#btn-copy-out) #last-paste-chip:not(:empty) {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+}
 .outcome-rail {
   width: 100%;
   padding: 0.38rem 0.45rem;

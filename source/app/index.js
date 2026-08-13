@@ -575,6 +575,7 @@ function paintOutcomePrompt() {
   const show = shouldShowOutcome(post);
   box.hidden = !show;
   paintLastPasteChip(chip, post.lastPaste, show);
+  paintCopyOut();
   if (!show) return;
   input.value = (post.outcome && post.outcome.note) || '';
 }
@@ -1483,6 +1484,43 @@ function hasLastPaste(post) {
   return Boolean(post && post.lastPaste && String(post.lastPaste.text || '').trim());
 }
 
+/** Synthetic download name from the snapshot only. No title, no home path. */
+function copyOutFilename(snap) {
+  const plat = String((snap && snap.platformId) || 'paste')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 24) || 'paste';
+  const raw = snap && snap.partIndex;
+  const part = Number.isFinite(Number(raw)) ? Math.max(0, Math.floor(Number(raw))) : 0;
+  return plat + '-part-' + part + '.txt';
+}
+
+function paintCopyOut() {
+  const btn = document.getElementById('btn-copy-out');
+  if (!btn) return;
+  btn.disabled = !hasLastPaste(getActive(state));
+}
+
+function bindCopyOut(btn) {
+  if (!btn || btn.dataset.copyOutBound) return;
+  btn.dataset.copyOutBound = '1';
+  btn.addEventListener('click', () => {
+    const post = getActive(state);
+    const snap = post.lastPaste;
+    if (!hasLastPaste(post)) return;
+    const blob = new Blob([String(snap.text)], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = copyOutFilename(snap);
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+}
+
 function hasOutcomeNote(post) {
   return Boolean(post && post.outcome && String(post.outcome.note || '').trim());
 }
@@ -1632,11 +1670,13 @@ function render() {
   applySelection();
   renderRail();
   paintThreadChrome();
+  paintCopyOut();
 }
 
 document.getElementById('btn-idea').addEventListener('click', () => addBlankIdea());
 
 bindLiveCopy(document.getElementById('btn-export'));
+bindCopyOut(document.getElementById('btn-copy-out'));
 
 await loadPlatforms();
 applyView();
