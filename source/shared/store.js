@@ -3,7 +3,9 @@
  *
  * The board holds many posts, one active. Shape:
  *
- *   { activeId, posts: [{ id, status, publishedAt, source, outcome, ideas[], ...postFields }] }
+ *   { activeId, ideaLayout, posts: [{ id, status, publishedAt, source, outcome, ideas[], ...postFields }] }
+ *
+ * `ideaLayout` is `'stack' | 'free'` (default `'stack'`). Board-level, not per post.
  *
  * `source` is 'studio' | 'banter' | 'marketing'. `outcome` is null or
  * { note, recordedAt } — an operator's record of what actually happened, kept
@@ -86,7 +88,7 @@ function blank() {
       { id: uid(), text: 'What if the post starts with the cost of waiting?', part: 'hook' }
     ]
   });
-  return withViews({ activeId: post.id, posts: [post] });
+  return withViews({ activeId: post.id, posts: [post], ideaLayout: 'stack' });
 }
 
 /**
@@ -105,7 +107,7 @@ function migrate(v1) {
     source: normalizeSource(post.source),
     outcome: normalizeOutcome(post.outcome)
   });
-  return { activeId: merged.id, posts: [merged] };
+  return { activeId: merged.id, posts: [merged], ideaLayout: 'stack' };
 }
 
 /** True for something shaped like a v2 board. */
@@ -137,7 +139,8 @@ function normalize(board) {
     }));
   if (!posts.length) posts.push(blankPost());
   const activeId = posts.some((p) => p.id === board.activeId) ? board.activeId : posts[0].id;
-  return { activeId, posts };
+  const ideaLayout = board.ideaLayout === 'free' ? 'free' : 'stack';
+  return { activeId, posts, ideaLayout };
 }
 
 /**
@@ -187,7 +190,11 @@ export function loadState() {
 
 export function saveState(state) {
   const board = isBoard(state) ? normalize(state) : normalize(migrate(state));
-  localStorage.setItem(KEY, JSON.stringify({ activeId: board.activeId, posts: board.posts }));
+  localStorage.setItem(KEY, JSON.stringify({
+    activeId: board.activeId,
+    posts: board.posts,
+    ideaLayout: board.ideaLayout === 'free' ? 'free' : 'stack'
+  }));
 }
 
 /** The active post. Never null — normalize guarantees at least one post. */

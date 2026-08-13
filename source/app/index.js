@@ -12,6 +12,7 @@ const rail = document.getElementById('rail');
 const plats = document.getElementById('plats');
 
 let state = loadState();
+if (state.ideaLayout !== 'stack' && state.ideaLayout !== 'free') state.ideaLayout = 'stack';
 let selected = 'stage';
 let drag = null;
 let pan = null;
@@ -20,6 +21,37 @@ const view = { x: 0, y: 0, scale: 1 };
 
 function persist() {
   saveState(state);
+}
+
+function ideaLayout() {
+  return state.ideaLayout === 'free' ? 'free' : 'stack';
+}
+
+function setIdeaLayout(mode) {
+  const next = mode === 'free' ? 'free' : 'stack';
+  if (next === 'free') {
+    getActive(state).ideas.forEach((idea, i) => placeIdeaIfNeeded(idea, i));
+  }
+  state.ideaLayout = next;
+  persist();
+  render();
+}
+
+/** Default canvas slot for an idea that has never been free-placed. */
+function placeIdeaIfNeeded(idea, index) {
+  if (typeof idea.x === 'number' && typeof idea.y === 'number') return;
+  idea.x = 40 + index * 16;
+  idea.y = 240 + index * 20;
+}
+
+function nextFreeIdeaPos() {
+  const ideas = getActive(state).ideas;
+  let last = null;
+  for (const idea of ideas) {
+    if (typeof idea.x === 'number' && typeof idea.y === 'number') last = idea;
+  }
+  if (last) return { x: last.x + 24, y: last.y + 28 };
+  return { x: 40, y: 240 };
 }
 
 function applyView() {
@@ -273,6 +305,7 @@ function ideaCard(idea) {
   const head = document.createElement('div');
   head.className = 'idea-head';
   const h3 = document.createElement('h3');
+  h3.className = 'drag';
   h3.textContent = 'Idea';
   const sel = document.createElement('select');
   sel.className = 'idea-part';
@@ -331,6 +364,14 @@ function ideaCard(idea) {
   actions.append(use, del);
   el.appendChild(actions);
   el.addEventListener('mousedown', () => { selectCard(idea.id); });
+  if (ideaLayout() === 'free') {
+    placeIdeaIfNeeded(idea, getActive(state).ideas.indexOf(idea));
+    el.style.left = idea.x + 'px';
+    el.style.top = idea.y + 'px';
+    bindDrag(el, idea);
+  } else {
+    bindReorder(el, idea);
+  }
   return el;
 }
 
@@ -395,30 +436,91 @@ function bindDrag(el, obj) {
     if (e.button !== 0 || spaceDown || pan) return;
     e.preventDefault();
     e.stopPropagation();
-    selectCard(obj.id || 'stage');
+    selectCard(obj.id && state.ideas.some((i) => i.id === obj.id) ? obj.id : 'stage');
     const p = toCanvas(e.clientX, e.clientY);
-    drag = { obj, ox: p.x - obj.x, oy: p.y - obj.y };
+    drag = { kind: 'xy', obj, el, ox: p.x - obj.x, oy: p.y - obj.y };
     handle.setPointerCapture(e.pointerId);
   });
 }
 
+function bindReorder(el, idea) {
+  const handle = el.querySelector('.drag');
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || spaceDown || pan) return;
+    e.preventDefault();
+    e.stopPropagation();
+    selectCard(idea.id);
+    drag = { kind: 'reorder', obj: idea, el };
+    handle.setPointerCapture(e.pointerId);
+  });
+}
+
+function reorderLive(clientY) {
+  const lane = document.getElementById('idea-lane');
+  if (!lane || !drag || drag.kind !== 'reorder') return;
+  const moving = drag.el;
+  const cards = [...lane.querySelectorAll('.card.idea')];
+  let before = null;
+  for (const card of cards) {
+    if (card === moving) continue;
+    const r = card.getBoundingClientRect();
+    if (clientY < r.top + r.height / 2) {
+      before = card;
+      break;
+    }
+  }
+  if (before) {
+    if (moving.nextElementSibling !== before) lane.insertBefore(moving, before);
+  } else if (cards[cards.length - 1] !== moving) {
+    lane.appendChild(moving);
+  }
+}
+
+function commitReorder() {
+  const lane = document.getElementById('idea-lane');
+  if (!lane) return;
+  const byId = new Map(getActive(state).ideas.map((idea) => [idea.id, idea]));
+  const next = [...lane.querySelectorAll('.card.idea')]
+    .map((node) => byId.get(node.dataset.id))
+    .filter(Boolean);
+  if (next.length) getActive(state).ideas = next;
+  persist();
+}
+
 canvas.addEventListener('pointermove', (e) => {
-  if (!drag || pan) return;
+  if (!drag || pan || drag.kind === 'reorder') return;
   const p = toCanvas(e.clientX, e.clientY);
   drag.obj.x = p.x - drag.ox;
   drag.obj.y = p.y - drag.oy;
-  const node = canvas.querySelector(`[data-id="${drag.obj.id || 'stage'}"]`);
-  if (node) {
-    node.style.left = drag.obj.x + 'px';
-    node.style.top = drag.obj.y + 'px';
+  if (drag.el) {
+    drag.el.style.left = drag.obj.x + 'px';
+    drag.el.style.top = drag.obj.y + 'px';
   }
 });
 
 canvas.addEventListener('pointerup', () => {
-  if (drag) persist();
+  if (!drag || drag.kind === 'reorder') return;
+  persist();
   drag = null;
 });
-canvas.addEventListener('pointercancel', () => { drag = null; });
+canvas.addEventListener('pointercancel', () => {
+  if (drag && drag.kind === 'reorder') return;
+  drag = null;
+});
+
+wrap.addEventListener('pointermove', (e) => {
+  if (!drag || drag.kind !== 'reorder') return;
+  reorderLive(e.clientY);
+});
+wrap.addEventListener('pointerup', () => {
+  if (!drag || drag.kind !== 'reorder') return;
+  commitReorder();
+  drag = null;
+});
+wrap.addEventListener('pointercancel', () => {
+  if (!drag || drag.kind !== 'reorder') return;
+  drag = null;
+});
 
 function armDelete(btn, onConfirm) {
   let armed = false;
@@ -750,6 +852,35 @@ function escapeHtml(s) {
   }[c]));
 }
 
+function applyIdeaLayoutClass() {
+  wrap.classList.toggle('ideas-free', ideaLayout() === 'free');
+  wrap.classList.toggle('ideas-stack', ideaLayout() === 'stack');
+}
+
+function paintIdeaLaneHead(lane) {
+  const head = document.createElement('div');
+  head.className = 'idea-lane-head';
+  const h2 = document.createElement('h2');
+  h2.textContent = 'Ideas';
+  const toggle = document.createElement('div');
+  toggle.className = 'idea-layout-toggle';
+  toggle.setAttribute('role', 'group');
+  toggle.setAttribute('aria-label', 'Idea layout');
+  for (const [mode, label] of [['stack', 'Stack'], ['free', 'Free']]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.setAttribute('aria-pressed', String(ideaLayout() === mode));
+    b.addEventListener('click', () => {
+      if (ideaLayout() === mode) return;
+      setIdeaLayout(mode);
+    });
+    toggle.appendChild(b);
+  }
+  head.append(h2, toggle);
+  lane.appendChild(head);
+}
+
 function ensureIdeaLane() {
   let lane = document.getElementById('idea-lane');
   if (lane) return lane;
@@ -829,9 +960,17 @@ function paintBoard() {
 function render() {
   canvas.innerHTML = '';
   const lane = ensureIdeaLane();
-  lane.innerHTML = '<h2>Ideas</h2>';
+  const free = ideaLayout() === 'free';
+  lane.innerHTML = '';
+  lane.classList.toggle('collapsed', free);
+  paintIdeaLaneHead(lane);
+  applyIdeaLayoutClass();
   renderPlatforms();
-  for (const idea of getActive(state).ideas) lane.appendChild(ideaCard(idea));
+  for (const idea of getActive(state).ideas) {
+    const card = ideaCard(idea);
+    if (free) canvas.appendChild(card);
+    else lane.appendChild(card);
+  }
   canvas.appendChild(stageCard());
   paintBoard();
   // Cards were just rebuilt from scratch. Re-assert the selection from the id
@@ -841,7 +980,13 @@ function render() {
 }
 
 document.getElementById('btn-idea').addEventListener('click', () => {
-  state.ideas.push({ id: uid(), text: '', part: '' });
+  const idea = { id: uid(), text: '', part: '' };
+  if (ideaLayout() === 'free') {
+    const pos = nextFreeIdeaPos();
+    idea.x = pos.x;
+    idea.y = pos.y;
+  }
+  state.ideas.push(idea);
   persist();
   render();
 });
