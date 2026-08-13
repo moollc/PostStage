@@ -177,14 +177,20 @@ function isLegacy(data) {
  * Repair a board that parsed but is not internally consistent: missing fields,
  * an empty list, or an `activeId` pointing at a post that is gone.
  */
+/**
+ * Whether this attachment would survive save/load. Blobs and over-budget
+ * files (attach stores those as blobs) are dropped. Small `data:image/` URLs stay.
+ */
+export function mediaPersists(m) {
+  if (!m || typeof m !== 'object') return false;
+  const url = String(m.url || '');
+  if (!url || /^blob:/i.test(url)) return false;
+  return true;
+}
+
 function persistableMedia(list) {
   if (!Array.isArray(list)) return [];
-  return list.filter((m) => {
-    if (!m || typeof m !== 'object') return false;
-    const url = String(m.url || '');
-    if (!url || /^blob:/i.test(url)) return false;
-    return true;
-  });
+  return list.filter(mediaPersists);
 }
 
 function normalize(board) {

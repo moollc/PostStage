@@ -1,5 +1,5 @@
 import { loadPlatforms, getPlatforms, getPlatform } from '/source/shared/platforms.js';
-import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, setLastPaste, addIdea, rememberStageWrite, undoStageWrite } from '/source/shared/store.js';
+import { loadState, saveState, uid, getActive, setActive, addPost, setPublished, setOutcome, setLastPaste, addIdea, rememberStageWrite, undoStageWrite, mediaPersists } from '/source/shared/store.js';
 import { scorePostMaybeWasm } from '/source/shared/score.js';
 import { structureFor, interactionsFor, monetizeFor, effectsFor, PARTS } from '/source/shared/playbook.js';
 import { listAgents, sendAgent, readAgent, lastShopLine, shortCwd } from '/source/shared/agent-bridge.js';
@@ -174,6 +174,13 @@ function isUsableBlob(m) {
   return Boolean(m && m.session && /^blob:/i.test(String(m.url || '')));
 }
 
+const LEAVES_ON_REFRESH = 'This picture leaves when you refresh';
+
+function mediaLeavesNote(m) {
+  if (!m || !m.url || mediaPersists(m)) return '';
+  return `<span class="media-session media-leaves">${LEAVES_ON_REFRESH}</span>`;
+}
+
 function mediaSlotHtml(media) {
   const m = media && media[0];
   if (!m || !m.url) {
@@ -183,13 +190,14 @@ function mediaSlotHtml(media) {
   if (/^blob:/i.test(m.url) && !isUsableBlob(m)) {
     return '<span class="media-placeholder">Click or drop an image<span class="media-session">Session only</span></span>';
   }
+  const leaves = mediaLeavesNote(m);
   if (isImageMedia(m)) {
-    return `<img class="media-img" src="${m.url}" alt="${escapeHtml(m.name || 'media')}">`;
+    return `<img class="media-img" src="${m.url}" alt="${escapeHtml(m.name || 'media')}">${leaves}`;
   }
   if (isVideoMedia(m)) {
-    return `<video class="media-vid" src="${m.url}" controls muted playsinline></video>`;
+    return `<video class="media-vid" src="${m.url}" controls muted playsinline></video>${leaves}`;
   }
-  return '<span class="media-placeholder">Media attached</span>';
+  return `<span class="media-placeholder">Media attached</span>${leaves}`;
 }
 
 function platformName(platform) {
@@ -691,8 +699,17 @@ function bindStageMediaSlot(preview) {
   slot.classList.add('droppable');
   slot.setAttribute('role', 'button');
   slot.tabIndex = 0;
-  slot.setAttribute('aria-label', 'Add a local image — this session only');
-  slot.title = 'Click or drop a local image (this session only)';
+  const attached = getActive(state).media && getActive(state).media[0];
+  if (attached && attached.url && mediaPersists(attached)) {
+    slot.setAttribute('aria-label', 'Replace local image');
+    slot.title = 'Click or drop a local image';
+  } else if (attached && attached.url && !mediaPersists(attached)) {
+    slot.setAttribute('aria-label', LEAVES_ON_REFRESH);
+    slot.title = LEAVES_ON_REFRESH;
+  } else {
+    slot.setAttribute('aria-label', 'Add a local image — this session only');
+    slot.title = 'Click or drop a local image (this session only)';
+  }
 
   const input = document.createElement('input');
   input.type = 'file';
@@ -1235,6 +1252,7 @@ function bindLiveCopy(btn) {
         copiedIds.add(post.id);
       }
       paintOutcomePrompt();
+      paintBoard();
       const partLabel = threadChromeLabel();
       if (partLabel) flash(`Copied · ${partLabel}`, 'copied');
       else if (text.length > (platform.maxChars || 0)) flash('Copied · over limit', 'warn');
@@ -1460,6 +1478,10 @@ function ensureBoard() {
   return board;
 }
 
+function hasLastPaste(post) {
+  return Boolean(post && post.lastPaste && String(post.lastPaste.text || '').trim());
+}
+
 function paintBoard() {
   const board = ensureBoard();
   board.innerHTML = '';
@@ -1472,6 +1494,8 @@ function paintBoard() {
     const row = document.createElement('div');
     row.className = 'board-row' + (post.id === state.activeId ? ' active' : '');
     row.dataset.id = post.id;
+    const copied = hasLastPaste(post);
+    if (copied) row.dataset.copied = '1';
     const pick = document.createElement('button');
     pick.type = 'button';
     pick.className = 'board-pick';
@@ -1484,6 +1508,13 @@ function paintBoard() {
       render();
     });
     row.appendChild(pick);
+    if (copied) {
+      const mark = document.createElement('span');
+      mark.className = 'board-copied';
+      mark.textContent = 'copied';
+      mark.title = String(post.lastPaste.text).replace(/\s+/g, ' ').trim();
+      row.appendChild(mark);
+    }
     if (post.source === 'banter') {
       const mark = document.createElement('span');
       mark.className = 'board-src';
