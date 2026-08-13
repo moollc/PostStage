@@ -7,6 +7,7 @@ import { formatThread, isFinalThreadPart } from '/source/shared/export.js';
 import { formatStageBrief } from '/source/shared/brief.js';
 import { isSafeRelPath, mediaSrcForPath } from '/source/shared/media-link.js';
 import { formatLedger } from '/source/shared/ledger.js';
+import { compressStill, IMAGE_PERSIST_BUDGET } from '/source/shared/compress-still.js';
 
 const canvas = document.getElementById('canvas');
 const wrap = canvas.parentElement;
@@ -32,8 +33,9 @@ const sessionClips = new Map();
  * not need to check the return value themselves; the line updates on its own.
  */
 function persist() {
-  saveState(state);
+  const ok = saveState(state);
   paintSaveError();
+  return ok;
 }
 
 function paintSaveError() {
@@ -796,9 +798,8 @@ async function attachLocalFile(file, imageOnly) {
     return true;
   }
 
-  const keep = { name: file.name, type: file.type, url: '', session: false };
-  const smallImage = file.type.startsWith('image/') && file.size <= 900000;
-  if (smallImage) {
+  const keep = { name: fileBasename(file.name), type: file.type, url: '', session: false };
+  if (file.size <= IMAGE_PERSIST_BUDGET) {
     try {
       keep.url = await readFileAsDataUrl(file);
     } catch {
@@ -806,15 +807,21 @@ async function attachLocalFile(file, imageOnly) {
       keep.session = true;
     }
   } else {
-    keep.url = URL.createObjectURL(file);
-    keep.session = true;
+    const compressed = await compressStill(file, IMAGE_PERSIST_BUDGET);
+    if (compressed && compressed.url) {
+      keep.name = compressed.name || keep.name;
+      keep.type = compressed.type || 'image/jpeg';
+      keep.url = compressed.url;
+      keep.session = false;
+    } else {
+      keep.url = URL.createObjectURL(file);
+      keep.session = true;
+    }
   }
   post.media = [keep];
-  try {
-    persist();
-  } catch (err) {
-    if (!quotaError(err) || !String(keep.url).startsWith('data:')) throw err;
+  if (!persist() && String(keep.url).startsWith('data:')) {
     keep.url = URL.createObjectURL(file);
+    keep.type = file.type;
     keep.session = true;
     post.media = [keep];
     persist();
@@ -1942,6 +1949,32 @@ render();
 pullInbox();
 setInterval(pullInbox, 10000);
 
+/**
+ * Still from an inbox post, re-checked on the way in.
+ *
+ * The launcher already filters, but this is a second gate on a different
+ * machine boundary: the client must not paint a `blob:` from someone else's
+ * page, a home path, or a video. Returns `[]` rather than throwing — a post
+ * with an unusable still is still worth reading.
+ */
+function inboxStill(raw) {
+  if (!Array.isArray(raw) || !raw.length) return [];
+  const item = raw[0];
+  if (!item || typeof item !== 'object') return [];
+  const type = String(item.type || '');
+  if (type && !type.startsWith('image/')) return [];
+
+  const url = String(item.url || '').trim();
+  if (url) {
+    if (!/^data:image\//i.test(url)) return [];
+    return [{ name: String(item.name || ''), type: type || 'image/*', url }];
+  }
+
+  const path = String(item.path || '').trim();
+  if (!path || !isSafeRelPath(path)) return [];
+  return [{ name: String(item.name || ''), type: type || 'image/*', path, url: mediaSrcForPath(path) }];
+}
+
 async function pullInbox() {
   try {
     const res = await fetch('/api/inbox');
@@ -1963,7 +1996,8 @@ async function pullInbox() {
         platform: item.platform || 'x',
         audience: item.audience || '',
         audienceHow: item.audience ? 'stated' : 'unknown',
-        source: item.source || 'banter'
+        source: item.source || 'banter',
+        media: inboxStill(item.media)
       });
       have.add(id);
       added = true;

@@ -19,6 +19,7 @@
     "test:browser-posts": "node tests/browser-post-isolation.mjs",
     "test:browser-media": "node tests/browser-media-reload.mjs",
     "test:browser-media-session": "node tests/browser-media-session.mjs",
+    "test:browser-compress": "node tests/browser-compress.mjs",
     "test:browser-platform": "node tests/browser-platform-paste.mjs",
     "test:browser-board": "node tests/browser-board-copied.mjs",
     "test:browser-noted": "node tests/browser-board-noted.mjs",
@@ -29,6 +30,7 @@
     "test:browser-video-x": "node tests/browser-video-x.mjs",
     "test:video-link": "node tests/video-link.test.mjs",
     "test:ledger": "node tests/ledger.test.mjs",
+    "test:inbox-still": "node tests/inbox-still.test.mjs",
     "score": "cargo build --release --manifest-path build/score/Cargo.toml"
   },
   "dependencies": {},

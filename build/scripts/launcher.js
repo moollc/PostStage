@@ -239,6 +239,47 @@ function normalizeAgents(parsed) {
   })).filter((a) => a.pane_id);
 }
 
+/**
+ * Media an inbox post may carry. Stills only, and only shapes that survive a
+ * reload on their own:
+ *
+ *   { url: 'data:image/...' }        under the same budget the canvas uses
+ *   { path: 'rel/inside/repo', href } a launcher /image?path= ref
+ *
+ * Rejected: anything with a home path, `blob:` (dead the moment the page that
+ * made it closes), and `data:video` (no video ingest this slice — a clip has to
+ * come through the canvas where the operator can watch it first).
+ *
+ * A rejected entry is dropped, not fatal: a marketing post with a bad still is
+ * still a post worth reading.
+ */
+const INBOX_DATA_URL_MAX = 900000;
+
+function persistableInboxMedia(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const name = String(item.name || '').trim().slice(0, 200);
+    const type = String(item.type || '').trim().slice(0, 100);
+    if (type && !type.startsWith('image/')) continue;
+
+    const url = String(item.url || '').trim();
+    if (url) {
+      if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(url)) continue;
+      if (url.length > INBOX_DATA_URL_MAX) continue;
+      out.push({ name, type: type || 'image/*', url });
+      continue;
+    }
+
+    const path = String(item.path || '').trim();
+    if (!path || !isSafeRelPath(path)) continue;
+    if (!/\.(png|jpe?g|gif|webp|avif|svg)$/i.test(path)) continue;
+    out.push({ name, type: type || 'image/*', path, href: `/image?path=${encodeURIComponent(path)}` });
+  }
+  return out.slice(0, 1);
+}
+
 function inboxId() {
   return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
@@ -399,6 +440,8 @@ async function handleRequest(req, res) {
       audience: String(payload.audience || ''),
       source: String(payload.source || 'banter')
     };
+    const media = persistableInboxMedia(payload.media);
+    if (media.length) entry.media = media;
     posts.push(entry);
     writeInboxPosts(posts);
     return json(res, 200, { ok: true, post: entry, posts });
